@@ -1,8 +1,5 @@
 # AI恋爱助手 - AI Love Assistant
 
-<p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=timeGradient&height=300&&section=header&text=AI恋爱助手&fontSize=90&fontAlign=50&fontAlignY=30&desc=AI Love Assistant&descAlign=50&descSize=30&descAlignY=60&animation=twinkling" />
-</p>
 
 ## 项目简介
 
@@ -90,29 +87,11 @@
 - 文件上传和管理
 - 会话状态管理
 
-## API接口
-
-**主要接口：**
-- `POST /api/love/chat/rag` - RAG知识库对话
-- `POST /api/love/game/chat` - 游戏对话
-- `POST /api/love/game/emo` - 情绪检测
-- `POST /api/user/register` - 用户注册
-- `POST /api/user/login` - 用户登录
-
-**请求示例：**
-```json
-{
-  "message": "我和女朋友最近总是吵架，不知道该怎么办",
-  "chatId": "user123"
-}
-```
-
 ## 知识库内容
 
 项目内置了丰富的恋爱知识库，包括：
 - **单身篇**：如何提升魅力、社交技巧、线上交友等
 - **恋爱篇**：沟通技巧、矛盾处理、关系维护等  
-- **已婚篇**：家庭责任、亲属关系、长期规划等
 
 ## 适用场景
 
@@ -131,4 +110,4 @@
 
 ---
 
-**AI恋爱助手 - 让AI成为你恋爱路上的贴心助手！**
+**LoveAI - 让AI成为你恋爱路上的贴心助手！**
