@@ -1,0 +1,60 @@
+server:
+  port: 8123
+  servlet:  #指定接口访问的路径，这样的话，我们在部署项目的时候只有访问 /api 才能够访问到后端接口
+    context-path: /api
+    # cookie 30 天过期
+    session:
+      cookie:
+        max-age: 2592000
+spring:
+  application:
+    name: ai-agent
+  profiles:
+    active: local
+  # session 配置
+  session:
+    store-type: redis
+    # 30天过期
+    timeout: 2592000
+  #数据库配置 - MySQL主数据源（MyBatis使用）
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    jdbc-url: jdbc:mysql://localhost:3306/loveai
+    username: root
+    password: 123456
+  #PostgreSQL数据源（Spring AI PgVector使用）
+  datasource-pg:
+    driver-class-name: org.postgresql.Driver
+    jdbc-url: jdbc:postgresql://192.168.12.125:5432/mydatabase
+    username: root  # 这个 mydatabase 是数据源，虚拟机中的 mydatabase 安装了 pgvector，如果切换数据源的话也得要安装 pgvector 插件
+    password: root
+  data:
+    redis:
+      host: 192.168.12.125
+      port: 6379
+      password: 123456
+      database: 0
+      timeout: 5000
+      lettuce:
+        pool:
+          max-active: 8    # 最大连接数
+          max-idle: 8      # 最大空闲连接
+          min-idle: 0      # 最小空闲连接
+          max-wait: 100ms  # 获取连接的最大等待时间
+mybatis-plus:
+  configuration:
+    # MyBatis-plus 配置
+    # 这个配置项决定是否自动将下划线命名风格的数据库字段名转换为驼峰命名风格的 Java 属性名
+    #默认值：true（即默认开启自动转换）
+    #设置为 false：表示禁用这种自动转换
+    map-underscore-to-camel-case: true
+    #仅在开发环境打印日志，开启调试的日志，用如下这个类去打印，兼容性会比较好一点
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: isDeleted #指定实体类中表示逻辑删除状态的字段名 isDeleted。数据库表中需要有对应的字段。
+      logic-delete-value: 1 #当记录被"删除"时，将这个字段设置为该值（默认为1）
+      logic-not-delete-value: 0 #表示记录未被删除的值（默认为0）
+    #实际效果
+    #当调用 deleteById() 等方法时，MyBatis-Plus 会自动执行 UPDATE 操作而非 DELETE，将指定字段更新为 logic-delete-value 值
+    #所有查询操作（selectList() 等）会自动附加条件 WHERE isDeleted = 0，只查询未删除的记录

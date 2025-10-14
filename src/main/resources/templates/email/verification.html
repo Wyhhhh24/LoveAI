@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>LoveAI - 邮箱验证码</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; background-color: #f9f9fb; color: #333; line-height: 1.6; padding: 20px 0; }
+        .email-container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08); }
+        .email-header { background: linear-gradient(135deg, #6e8efb, #a777e3); padding: 25px 20px; text-align: center; color: white; }
+        .logo { font-size: 32px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+        .logo-icon { margin-right: 12px; font-size: 36px; }
+        .email-content { padding: 30px; }
+        .greeting { font-size: 20px; margin-bottom: 20px; color: #444; }
+        .code-container { background: #f0f4ff; border-radius: 12px; padding: 20px; text-align: center; margin: 25px 0; border: 1px dashed #a777e3; }
+        .verification-code { font-size: 42px; font-weight: 800; letter-spacing: 8px; color: #6e8efb; padding: 10px; margin: 15px 0; background: #fff; border-radius: 8px; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05); font-family: 'Courier New', monospace; }
+        .expire-notice { font-size: 16px; color: #666; margin: 20px 0; text-align: center; }
+        .expire-time { color: #ff6b6b; font-weight: 700; }
+        .warning { background: #fff9f9; border-left: 4px solid #ff6b6b; padding: 12px; margin: 20px 0; border-radius: 4px; font-size: 14px; }
+        .email-footer { background: #f8f9fa; padding: 20px; text-align: center; color: #666; font-size: 14px; border-top: 1px solid #eee; }
+        @media (max-width: 650px) {
+            .email-container { margin: 0 10px; }
+            .email-content { padding: 20px; }
+            .verification-code { font-size: 32px; letter-spacing: 5px; }
+        }
+    </style>
+</head>
+<body>
+<div class="email-container">
+    <div class="email-header">
+        <div class="logo"><span class="logo-icon">❤️</span> LoveAI</div>
+    </div>
+
+    <div class="email-content">
+        <h2 class="greeting">您好！</h2>
+        <p>感谢您使用 LoveAI 服务，请使用以下验证码完成邮箱验证：</p>
+
+        <div class="code-container">
+            <div class="verification-code" th:text="${code}">123456</div>
+            <div class="expire-notice">验证码 <span class="expire-time" th:text="${expireMinutes}">3</span> 分钟内有效</div>
+        </div>
+
+        <div class="warning">⚠️ 安全提示：请勿向任何人泄露此验证码</div>
+
+        <p>如非本人操作，请忽略此邮件。</p>
+    </div>
+
+    <div class="email-footer">
+        <p>LoveAI · 让AI更有温度</p>
+    </div>
+</div>
+</body>
+</html>
