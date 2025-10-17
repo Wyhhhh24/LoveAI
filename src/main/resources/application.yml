@@ -41,6 +41,9 @@ spring:
           max-idle: 8      # 最大空闲连接
           min-idle: 0      # 最小空闲连接
           max-wait: 100ms  # 获取连接的最大等待时间
+    mongodb:
+      uri: mongodb://root:root@192.168.12.125:27017/loveai?authSource=admin
+
 mybatis-plus:
   configuration:
     # MyBatis-plus 配置

@@ -17,4 +17,9 @@ public class ChatRequest {
      * 用户id
      */
     private String chatId;
+
+    /**
+     * 会话id
+     */
+    private String sessionId;
 }

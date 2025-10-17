@@ -178,6 +178,11 @@
             <version>7.2.5</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-mongodb</artifactId>
+        </dependency>
+
 
         <!-- 字体库       -->
         <!-- https://mvnrepository.com/artifact/com.itextpdf/font-asian -->

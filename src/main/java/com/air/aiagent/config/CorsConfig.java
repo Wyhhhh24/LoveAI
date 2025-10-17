@@ -1,6 +1,8 @@
 package com.air.aiagent.config;
 
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.MediaType;
+import org.springframework.web.servlet.config.annotation.ContentNegotiationConfigurer;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -15,7 +17,7 @@ public class CorsConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         // 覆盖所有请求
-        registry.addMapping("/**") //对所有的请求支持跨域
+        registry.addMapping("/**") // 对所有的请求支持跨域
                 // 允许发送 Cookie
                 .allowCredentials(true)
                 // 放行哪些域名（必须用 patterns，否则 * 会和 allowCredentials 冲突）
@@ -23,5 +25,28 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .exposedHeaders("*");
+    }
+
+    /**
+     * 内容协商配置
+     * 解决 HttpMediaTypeNotAcceptableException 问题
+     */
+    @Override
+    public void configureContentNegotiation(ContentNegotiationConfigurer configurer) {
+        configurer
+                // 是否通过请求Url的扩展名来决定media type
+                .favorPathExtension(false)
+                // 是否通过请求参数来决定media type
+                .favorParameter(false)
+                // 忽略Accept Header
+                .ignoreAcceptHeader(false)
+                // 设置默认的media type
+                .defaultContentType(MediaType.APPLICATION_JSON)
+                // 支持的媒体类型
+                .mediaType("json", MediaType.APPLICATION_JSON)
+                .mediaType("html", MediaType.TEXT_HTML)
+                .mediaType("xml", MediaType.APPLICATION_XML)
+                // 支持 SSE (Server-Sent Events)
+                .mediaType("event-stream", MediaType.TEXT_EVENT_STREAM);
     }
 }

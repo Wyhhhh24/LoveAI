@@ -1,30 +1,43 @@
 package com.air.aiagent.exception;
+
 import com.air.aiagent.common.BaseResponse;
 import com.air.aiagent.common.ResultUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 /**
  * 全局异常处理器
  */
-@RestControllerAdvice //环绕切面，可以在这个类中写一些切点
+@RestControllerAdvice // 环绕切面，可以在这个类中写一些切点
 @Slf4j
 public class GlobalExceptionHandler {
 
     // BusinessException 继承自 RuntimeException，因此它属于 "运行时异常" 的一种。
-    // 但 @ExceptionHandler 会优先匹配 最具体的异常类型（即 BusinessException），而不是父类 RuntimeException。
+    // 但 @ExceptionHandler 会优先匹配 最具体的异常类型（即 BusinessException），而不是父类
+    // RuntimeException。
     // 虽然 BusinessException 是 RuntimeException 的子类，但异常处理机制会优先匹配具体子类
-
 
     // 对任何的业务异常进行处理
     // 只要在项目中任何一个方法中抛出BusinessException异常，都会被我们的环绕切面给捕获到
     // 然后我们就可以在这个方法里去写怎么处理这个异常
     @ExceptionHandler(BusinessException.class)
     public BaseResponse<?> businessExceptionHandler(BusinessException e) {
-        log.error("BusinessException", e); //打印异常的信息
+        log.error("BusinessException", e); // 打印异常的信息
         return ResultUtils.error(e.getCode(), e.getMessage());
-        //给前端返回一个更友好的封装之后的错误信息，封装为我们自己的返回
+        // 给前端返回一个更友好的封装之后的错误信息，封装为我们自己的返回
+    }
+
+    /**
+     * 处理HttpMediaTypeNotAcceptableException异常
+     * 当前端Accept头与后端返回类型不匹配时触发
+     */
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+    public BaseResponse<?> handleHttpMediaTypeNotAcceptable(HttpMediaTypeNotAcceptableException e) {
+        log.warn("HttpMediaTypeNotAcceptableException: {}", e.getMessage());
+        // 返回JSON格式的错误信息
+        return ResultUtils.error(ErrorCode.PARAMS_ERROR, "请求的媒体类型不支持，请检查Accept头设置");
     }
 
     // 封装一个更广泛的异常处理
@@ -35,4 +48,3 @@ public class GlobalExceptionHandler {
         return ResultUtils.error(ErrorCode.SYSTEM_ERROR, "系统错误");
     }
 }
-

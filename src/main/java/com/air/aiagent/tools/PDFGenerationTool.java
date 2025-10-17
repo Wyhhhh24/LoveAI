@@ -1,4 +1,5 @@
 package com.air.aiagent.tools;
+
 import cn.hutool.core.lang.UUID;
 import com.air.aiagent.context.UserContext;
 import com.air.aiagent.domain.entity.UserFile;
@@ -59,29 +60,27 @@ public class PDFGenerationTool {
     private UserFileService fileService;
 
     @Tool(description = """
-            Generate a beautifully formatted PDF from Markdown content.
+            生成精美PDF文档，将Markdown内容转为专业报告并上传云端。
 
-            Supported Markdown syntax:
-            - Headers: # H1, ## H2, ### H3
-            - Bold: **text**
-            - Italic: *text*
-            - Bullet lists: - item or * item
-            - Numbered lists: 1. item
-            - Quotes: > quote
-            - Dividers: ---
-            - Emojis: 😊 💕 🎉
+            支持：# 标题、## 二级标题、**粗体**、- 列表、> 引用、--- 分隔、😊 emoji
 
-            Example:
-            # Title
-            ## Section
-            - Point 1
-            - Point 2
-            **Important** content here!
+            用于：恋爱建议报告、行动计划、问题分析等结构化文档。
+
+            格式示例：
+            # 报告标题
+            ## 📋 章节1
+            > 重要提示
+            - **要点**：说明
+            ---
+            ## 💡 章节2
+            内容...
+
+            仅当用户明确要求且对话有深度时调用。
             """)
     public String generatePDFToMinio(
-            @ToolParam(description = "PDF file name (e.g., report.pdf)") String fileName,
-            @ToolParam(description = "Content in Markdown format") String content,
-            @ToolParam(description = "User ID for file storage") String userId) throws IOException {
+            @ToolParam(description = "PDF文件名，格式如：恋爱成长报告.pdf、行动计划.pdf") String fileName,
+            @ToolParam(description = "Markdown格式的完整内容，必须包含标题、章节、列表等结构化元素") String content,
+            @ToolParam(description = "用户ID，用于文件存储和权限管理") String userId) throws IOException {
 
         String safeUserId = (userId != null && !userId.isEmpty()) ? userId : UserContext.getSafeUserId();
         File pdfFile = File.createTempFile(fileName, ".pdf");
@@ -175,10 +174,12 @@ public class PDFGenerationTool {
                             .fileName(fileName)
                             .build();
                     fileService.save(userFile);
-                }, "userId：" + safeUserId + " => 添加文件信息到数据库成功");
-                return pdfFile.getName() + " generated successfully";
+                }, "用户ID：" + safeUserId + " => PDF文档已保存到数据库：" + fileName);
+
+                // 返回成功消息（大模型会看到这个返回值）
+                return "PDF文档《" + fileName + "》已成功生成并上传到云端。请告知用户可以通过「文档」按钮查看。";
             } else {
-                return "Error generating PDF";
+                return "PDF生成失败，请稍后重试或联系技术支持。";
             }
 
         } catch (IOException e) {
@@ -189,7 +190,7 @@ public class PDFGenerationTool {
         }
     }
 
-    // ==================== Markdown解析与渲染 ====================
+    // Markdown解析与渲染
 
     /**
      * 解析Markdown内容并渲染到PDF
@@ -221,7 +222,7 @@ public class PDFGenerationTool {
 
             lastWasEmpty = false; // 重置空行标记
 
-            // 1️⃣ 一级标题 #
+            // 一级标题 #
             if (line.startsWith("# ") && !line.startsWith("## ")) {
                 if (currentList != null) {
                     document.add(currentList);
@@ -233,7 +234,7 @@ public class PDFGenerationTool {
                 continue;
             }
 
-            // 2️⃣ 二级标题 ##
+            // 二级标题 ##
             if (line.startsWith("## ") && !line.startsWith("### ")) {
                 if (currentList != null) {
                     document.add(currentList);
@@ -245,7 +246,7 @@ public class PDFGenerationTool {
                 continue;
             }
 
-            // 3️⃣ 三级标题 ###
+            // 三级标题 ###
             if (line.startsWith("### ")) {
                 if (currentList != null) {
                     document.add(currentList);
@@ -257,7 +258,7 @@ public class PDFGenerationTool {
                 continue;
             }
 
-            // 4️⃣ 分隔线 --- 或 ***
+            // 分隔线 --- 或 ***
             if (line.matches("^[-*]{3,}$")) {
                 if (currentList != null) {
                     document.add(currentList);
@@ -268,7 +269,7 @@ public class PDFGenerationTool {
                 continue;
             }
 
-            // 5️⃣ 引用块 >
+            // 引用块 >
             if (line.startsWith("> ")) {
                 if (currentList != null) {
                     document.add(currentList);
@@ -279,7 +280,7 @@ public class PDFGenerationTool {
                 continue;
             }
 
-            // 6️⃣ 无序列表 - 或 *
+            // 无序列表 - 或 *
             if (line.matches("^[-*]\\s+.*")) {
                 if (currentList == null || inOrderedList) {
                     if (currentList != null) {
@@ -300,7 +301,7 @@ public class PDFGenerationTool {
                 continue;
             }
 
-            // 7️⃣ 有序列表 1. 2. 3.
+            // 有序列表 1. 2. 3.
             if (line.matches("^\\d+\\.\\s+.*")) {
                 if (currentList == null || !inOrderedList) {
                     if (currentList != null) {
@@ -320,7 +321,7 @@ public class PDFGenerationTool {
                 continue;
             }
 
-            // 8️⃣ 普通段落（处理内联格式：粗体、斜体）
+            // 普通段落（处理内联格式：粗体、斜体）
             if (currentList != null) {
                 document.add(currentList);
                 currentList = null;
