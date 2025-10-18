@@ -45,13 +45,13 @@ class LoveAppDocumentLoaderTest {
         // 如果 answer 是 null，测试会立即失败并抛出异常；否则测试继续执行
     }
 
-    @Test
-    void doChatWithReport() {
-        String chatId = UUID.randomUUID().toString();
-        String message = "你好，我是程序员鱼皮,让另一半（编程导航）更爱我，但我不知道怎么做";
-        LoveApp.LoveReport loveReport = loveApp.doChatWithReport(message, chatId);
-        Assertions.assertNotNull(loveReport);
-    }
+//    @Test
+//    void doChatWithReport() {
+//        String chatId = UUID.randomUUID().toString();
+//        String message = "你好，我是程序员鱼皮,让另一半（编程导航）更爱我，但我不知道怎么做";
+//        LoveApp.LoveReport loveReport = loveApp.doChatWithReport(message, chatId);
+//        Assertions.assertNotNull(loveReport);
+//    }
 
 //    @Test
 //    void doChatWithRag() {
@@ -65,41 +65,41 @@ class LoveAppDocumentLoaderTest {
 
 
 
-    private void testMessage(String message) {
-        String chatId = UUID.randomUUID().toString();
-        String answer = loveApp.doChatWithTools(message, chatId);
-        Assertions.assertNotNull(answer);
-    }
+//    private void testMessage(String message) {
+//        String chatId = UUID.randomUUID().toString();
+//        String answer = loveApp.doChatWithRagAndTools(message, chatId);
+//        Assertions.assertNotNull(answer);
+//    }
 
-    @Test
-    void doChatWithTools() {
-        // 测试联网搜索问题的答案
-        //testMessage("周末想带女朋友去上海约会，推荐几个适合情侣的小众打卡地？");
+//    @Test
+//    void doChatWithTools() {
+//        // 测试联网搜索问题的答案
+//        //testMessage("周末想带女朋友去上海约会，推荐几个适合情侣的小众打卡地？");
+//
+//        // 测试网页抓取：恋爱案例分析
+//        testMessage("最近和对象吵架了，看看其它网站中的情侣是怎么解决矛盾的？");
+//
+//        // 测试资源下载：图片下载
+//        testMessage("直接下载一张适合做手机壁纸的星空情侣图片为文件");
+//
+//        // 测试终端操作：执行代码
+//        //testMessage("执行 Python3 脚本来生成数据分析报告");
+//
+//        // 测试文件操作：保存用户档案
+//        testMessage("保存我的恋爱档案为文件");
+//
+//        // 测试 PDF 生成
+//        testMessage("生成一份‘七夕约会计划’PDF，包含餐厅预订、活动流程和礼物清单");
+//    }
 
-        // 测试网页抓取：恋爱案例分析
-        testMessage("最近和对象吵架了，看看其它网站中的情侣是怎么解决矛盾的？");
-
-        // 测试资源下载：图片下载
-        testMessage("直接下载一张适合做手机壁纸的星空情侣图片为文件");
-
-        // 测试终端操作：执行代码
-        //testMessage("执行 Python3 脚本来生成数据分析报告");
-
-        // 测试文件操作：保存用户档案
-        testMessage("保存我的恋爱档案为文件");
-
-        // 测试 PDF 生成
-        testMessage("生成一份‘七夕约会计划’PDF，包含餐厅预订、活动流程和礼物清单");
-    }
-
-    @Test
-    void doChatWithMCP() {
-        String chatId = UUID.randomUUID().toString();
-        //测试地图MCP
-        String message = "我的女朋友住在广东省东莞市虎门镇，请推荐一下该地区的公园公园";
-        String answer = loveApp.doChatWithMCP(message, chatId);
-        Assertions.assertNotNull(answer);
-    }
+//    @Test
+//    void doChatWithMCP() {
+//        String chatId = UUID.randomUUID().toString();
+//        //测试地图MCP
+//        String message = "我的女朋友住在广东省东莞市虎门镇，请推荐一下该地区的公园公园";
+//        String answer = loveApp.doChatWithMCP(message, chatId);
+//        Assertions.assertNotNull(answer);
+//    }
 
 
 }

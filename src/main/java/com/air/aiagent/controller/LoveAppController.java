@@ -12,10 +12,7 @@ import com.air.aiagent.domain.dto.ChatRequest;
 import com.air.aiagent.domain.entity.ChatMessage;
 import com.air.aiagent.domain.entity.ChatSession;
 import com.air.aiagent.domain.entity.User;
-import com.air.aiagent.domain.vo.ChatMessageVO;
-import com.air.aiagent.domain.vo.ChatSessionVO;
-import com.air.aiagent.domain.vo.ChatHistory;
-import com.air.aiagent.domain.vo.UserFileVO;
+import com.air.aiagent.domain.vo.*;
 import com.air.aiagent.exception.BusinessException;
 import com.air.aiagent.exception.ErrorCode;
 import com.air.aiagent.mapper.repository.ChatMessageRepository;
@@ -25,11 +22,16 @@ import com.air.aiagent.service.UserService;
 import com.air.aiagent.service.impl.ChatMessageService;
 import com.air.aiagent.service.impl.ChatSessionService;
 import com.air.aiagent.utils.SessionIdGenerator;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.DigestUtils;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
+
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -91,10 +93,11 @@ public class LoveAppController {
 
     @LoginCheck
     @PostMapping("/game/emo")
-    public String gameEmo(@RequestBody ChatRequest request) {
+    public BaseResponse<GameChatVO> gameEmo(@RequestBody ChatRequest request) {
         log.info("收到判断情绪请求: {}", request);
         UserContext.setUserId(request.getChatId());
-        return loveApp.doChatWithEmo(request.getMessage(), request.getChatId());
+        GameChatVO gameChatVO = loveApp.doChatWithEmo(request.getMessage(), request.getChatId());
+        return ResultUtils.success(gameChatVO);
     }
 
     @LoginCheck
@@ -102,7 +105,7 @@ public class LoveAppController {
     public Flux<String> gameChat(@RequestBody ChatRequest request) {
         log.info("收到游戏请求: {}", request);
         UserContext.setUserId(request.getChatId());
-        return loveApp.gameStreamChat(request.getMessage(), request.getChatId());
+        return loveApp.gameStreamChat(request);
     }
 
     /**
@@ -177,17 +180,17 @@ public class LoveAppController {
         ChatSession chatSession = chatSessionRepository.findByIdAndChatId(sessionId, loginUser.getId().toString())
                 .orElseThrow(() -> new BusinessException(ErrorCode.PARAMS_ERROR, "当前用户不存在该会话"));
 
-        // 4.存在最新的会话，设置会话Id
+        // 5.存在最新的会话，设置会话Id
         chatHistory.setSessionId(chatSession.getId());
 
-        // 5.根据会话Id 查找该记录中的聊天历史，包含最新消息在内的最近10条记录，转换成 VO
+        // 6.根据会话Id 查找该记录中的聊天历史，包含最新消息在内的最近10条记录，转换成 VO
         List<ChatMessage> latestChatMessageList = chatMessageRepository.findHistoryExcludingLatest(chatSession.getId(),
                 10, 0);
         List<ChatMessageVO> latestChatMessageVOList = latestChatMessageList.stream().map(chatMessage -> {
             return BeanUtil.copyProperties(chatMessage, ChatMessageVO.class);
         }).toList();
 
-        // 6.进行封装返回
+        // 7.进行封装返回
         chatHistory.setChatMessageVOList(latestChatMessageVOList);
         return ResultUtils.success(chatHistory);
     }
@@ -223,8 +226,7 @@ public class LoveAppController {
      */
     @LoginCheck
     @PostMapping("/getChatSessionList")
-    public BaseResponse<List<ChatSessionVO>> getChatSessionList(@RequestBody ChatRequest request,
-            HttpServletRequest httpServletRequest) {
+    public BaseResponse<List<ChatSessionVO>> getChatSessionList(@RequestBody ChatRequest request, HttpServletRequest httpServletRequest) {
         // 1.根据 用户Id 查询所有会话记录
         List<ChatSession> chatSessionList = chatSessionRepository.findByChatId(request.getChatId());
         if (chatSessionList.isEmpty()) {
@@ -311,6 +313,27 @@ public class LoveAppController {
             log.info("会话消息为空，无需清空，sessionId={}", sessionId);
             return ResultUtils.success(true);
         }
+    }
+
+    // 生成请求体的 MD5 摘要作为缓存 Key 的一部分
+    public String generateCacheKey(ChatRequest request) throws JsonProcessingException {
+        String sessionId = request.getSessionId();
+        String chatId = request.getChatId();
+        // 去除首尾的空白字符后，是否为一个空字符串
+        if (sessionId == null || sessionId.trim().isEmpty() || chatId == null || chatId.trim().isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+
+        // 2. 构建用于生成哈希的原始字符串
+        // 使用分隔符（如冒号）拼接，避免字段值边界不清导致重复
+        // 例如，sessionId="s1", chatId="02" 和 sessionId="s10", chatId="2" 不加分隔符都会是"s102"
+        String originalString = sessionId + ":" + chatId;
+
+        // 3. 生成MD5摘要
+        String requestBodyHash = DigestUtils.md5DigestAsHex(originalString.getBytes(StandardCharsets.UTF_8));
+
+        // 4. 拼接业务前缀并返回
+        return "chat:history:" + requestBodyHash;
     }
 
     // POST http://localhost:8123/api/love/game/emo

@@ -26,4 +26,7 @@ public interface Constant {
      */
     String FILE_SAVE_DIR = System.getProperty("user.dir") + "/tmp";
     // 通常是项目的根目录（与 pom.xml 或 build.gradle 同级）
+
+
+    String GAME_SESSION_NAME = "d4728f1a-5b3e-4c89-b12f-7a9c83e14f21";
 }

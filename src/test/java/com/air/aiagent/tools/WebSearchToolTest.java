@@ -16,7 +16,7 @@ class WebSearchToolTest {
     @Test
     void searchWeb() {
         WebSearchTool webSearchTool = new WebSearchTool(apiKey);
-        String query = "广东石油化工学院怎么样？";
+        String query = "女朋友生气了，我该怎么安慰她";
         String result = webSearchTool.searchWeb(query);
         System.out.println(result);
         Assertions.assertNotNull(result);

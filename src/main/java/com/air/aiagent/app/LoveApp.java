@@ -5,16 +5,18 @@ import com.air.aiagent.advisor.MyLoggerAdvisor;
 import com.air.aiagent.constant.SystemConstants;
 import com.air.aiagent.domain.dto.ChatRequest;
 import com.air.aiagent.domain.entity.ChatMessage;
+import com.air.aiagent.domain.entity.ChatSession;
 import com.air.aiagent.domain.entity.MessageMetadata;
 import com.air.aiagent.domain.entity.MessageType;
+import com.air.aiagent.domain.vo.GameChatVO;
 import com.air.aiagent.mapper.repository.ChatMessageRepository;
 import com.air.aiagent.mapper.repository.ChatSessionRepository;
 import com.air.aiagent.service.impl.AsyncTaskService;
 import com.air.aiagent.service.impl.ChatSessionService;
+import com.air.aiagent.utils.SessionIdGenerator;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -31,6 +33,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
+import static com.air.aiagent.constant.Constant.GAME_SESSION_NAME;
 import static org.springframework.ai.chat.client.advisor.AbstractChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY;
 import static org.springframework.ai.chat.client.advisor.AbstractChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY;
 
@@ -46,23 +49,13 @@ public class LoveApp {
 
         private final ChatClient gameClient;
 
-        private final ChatMemory chatMemory;
-
-        private final ChatMemory gameMemory;
-
-        private final ChatMemory emoMemory;
-
         private final ChatClient emoClient;
+
 
         /**
          * 初始化 AI 客户端 ChatClient
          */
         public LoveApp(ChatModel dashscopeChatModel) {
-                // 初始化基于内存的对话记忆，这个 InMemoryChatMemory 是 ChatMemory 接口的一个实现类，SpringAI已经帮我们实现好了
-                chatMemory = new InMemoryChatMemory();
-                gameMemory = new InMemoryChatMemory();
-                emoMemory = new InMemoryChatMemory();
-
                 /**
                  * 初始化 ChatClient
                  */
@@ -81,7 +74,6 @@ public class LoveApp {
                 gameClient = ChatClient.builder(dashscopeChatModel)
                                 .defaultSystem(SystemConstants.GAME_SYSTEM_PROMPT)
                                 .defaultAdvisors(
-                                                new MessageChatMemoryAdvisor(gameMemory),
                                                 // 自定义日志拦截器，可按需开启
                                                 new MyLoggerAdvisor())
                                 .build();
@@ -89,7 +81,6 @@ public class LoveApp {
                 emoClient = ChatClient.builder(dashscopeChatModel)
                                 .defaultSystem(SystemConstants.EMOTION_DETECTION)
                                 .defaultAdvisors(
-                                                new MessageChatMemoryAdvisor(emoMemory),
                                                 // 自定义日志拦截器，可按需开启
                                                 new MyLoggerAdvisor())
                                 .build();
@@ -140,6 +131,11 @@ public class LoveApp {
         @Resource
         private AsyncTaskService asyncTaskService;
 
+        // 引入这个类，我们的Spring AI MCP 服务，它在启动的时候，会自动去读取我们刚刚所写的 mcp-servers.json 配置文件
+        // 从中找到所有的工具，然后自动注册到这个工具提供者类上，我们就可以直接使用它了
+        @Resource
+        private ToolCallbackProvider toolCallbackProvider;
+
         /**
          * AI 调用工具能力
          */
@@ -184,75 +180,77 @@ public class LoveApp {
                 long startTime = System.currentTimeMillis();
 
                 // 5. 流式调用AI并累积响应
-                return chatClient.prompt()
-                                .user("userId = " + request.getChatId() + "," + fullPrompt)
-                                // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId) 改为使用
-                                // MongoDB 存储会话历史
-                                // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-                                // 应用 RAG 知识库问答（基于内存的知识库服务）
-                                // .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
-                                // 应用 RAG 检索增强服务（基于云知识库服务）
-                                // .advisors(loveAppRagCloudAdvisor)
-                                // 应用 RAG 检索增强服务（基于 PgVector 向量存储）
-                                .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
-                                .tools(allTools)
-                                .stream()
-                                .content() // 流式处理
-                                // 关键：doOnNext累积每个chunk
-                                .doOnNext(chunk -> {
-                                        aiResponseBuilder.append(chunk);
-                                })
-                                // 关键：doOnComplete 在流式结束后保存
-                                .doOnComplete(() -> {
-                                        // 计算耗时
-                                        long duration = System.currentTimeMillis() - startTime;
-                                        // 同步保存完整的 AI 回复
-                                        String aiContent = aiResponseBuilder.toString();
-                                        // 构建消息实体
-                                        ChatMessage aiMessage = ChatMessage.builder()
+                return chatClient
+                        .prompt()
+                        .user("userId = " + request.getChatId() + "," + fullPrompt)
+                        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId) 改为使用
+                        // MongoDB 存储会话历史
+                        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+                        // 应用 RAG 知识库问答（基于内存的知识库服务）
+                        // .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
+                        // 应用 RAG 检索增强服务（基于云知识库服务）
+                        // .advisors(loveAppRagCloudAdvisor)
+                        // 应用 RAG 检索增强服务（基于 PgVector 向量存储）
+                        .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
+                        .tools(allTools)
+                        .tools(toolCallbackProvider)
+                        .stream()
+                        .content() // 流式处理
+                        // 关键：doOnNext累积每个chunk
+                        .doOnNext(chunk -> {
+                                aiResponseBuilder.append(chunk);
+                        })
+                        // 关键：doOnComplete 在流式结束后保存
+                        .doOnComplete(() -> {
+                                // 计算耗时
+                                long duration = System.currentTimeMillis() - startTime;
+                                // 同步保存完整的 AI 回复
+                                String aiContent = aiResponseBuilder.toString();
+                                // 构建消息实体
+                                ChatMessage aiMessage = ChatMessage.builder()
+                                                .id(aiMessageId)
+                                                .chatId(request.getChatId())
+                                                .sessionId(request.getSessionId())
+                                                .content(aiContent)
+                                                .messageType(MessageType.TEXT)
+                                                .isAiResponse(true)
+                                                .metadata(MessageMetadata.builder()
+                                                                .responseTimeMs((int) duration)
+                                                                .tokenCount(estimateTokens(aiContent))
+                                                                .build())
+                                                .build();
+                                // 保存到 MongoDB
+                                chatMessageRepository.save(aiMessage);
+                                log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(),
+                                                aiContent.length());
+
+                                // 更新会话的消息计数（+2，用户消息1条 + AI回复1条）
+                                chatSessionService.incrementMessageCount(request.getSessionId());
+                                chatSessionService.incrementMessageCount(request.getSessionId());
+                        })
+                        // 关键：doOnError处理异常
+                        .doOnError(error -> {
+                                log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
+                                // 即使出错，也保存已有的部分内容
+                                if (aiResponseBuilder.length() > 0) {
+                                        String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
+                                        ChatMessage errorMessage = ChatMessage.builder()
                                                         .id(aiMessageId)
                                                         .chatId(request.getChatId())
                                                         .sessionId(request.getSessionId())
-                                                        .content(aiContent)
+                                                        .content(errorContent)
                                                         .messageType(MessageType.TEXT)
                                                         .isAiResponse(true)
-                                                        .metadata(MessageMetadata.builder()
-                                                                        .responseTimeMs((int) duration)
-                                                                        .tokenCount(estimateTokens(aiContent))
-                                                                        .build())
                                                         .build();
-                                        // 保存到 MongoDB
-                                        chatMessageRepository.save(aiMessage);
-                                        log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(),
-                                                        aiContent.length());
+                                        chatMessageRepository.save(errorMessage);
+                                        log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
+                                                        errorContent.length());
 
-                                        // 更新会话的消息计数（+2，用户消息1条 + AI回复1条）
+                                        // 更新会话的消息计数（+2，用户消息1条 + AI错误回复1条）
                                         chatSessionService.incrementMessageCount(request.getSessionId());
                                         chatSessionService.incrementMessageCount(request.getSessionId());
-                                })
-                                // 关键：doOnError处理异常
-                                .doOnError(error -> {
-                                        log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
-                                        // 即使出错，也保存已有的部分内容
-                                        if (aiResponseBuilder.length() > 0) {
-                                                String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
-                                                ChatMessage errorMessage = ChatMessage.builder()
-                                                                .id(aiMessageId)
-                                                                .chatId(request.getChatId())
-                                                                .sessionId(request.getSessionId())
-                                                                .content(errorContent)
-                                                                .messageType(MessageType.TEXT)
-                                                                .isAiResponse(true)
-                                                                .build();
-                                                chatMessageRepository.save(errorMessage);
-                                                log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
-                                                                errorContent.length());
-
-                                                // 更新会话的消息计数（+2，用户消息1条 + AI错误回复1条）
-                                                chatSessionService.incrementMessageCount(request.getSessionId());
-                                                chatSessionService.incrementMessageCount(request.getSessionId());
-                                        }
-                                });
+                                }
+                        });
         }
 
         /**
@@ -283,13 +281,31 @@ public class LoveApp {
         }
 
         /**
+         * 保存用户游戏记录到 MongoDB
+         */
+        private ChatMessage saveUserGameMessage(ChatRequest request) {
+                String userMessageId = UUID.randomUUID().toString();
+                ChatMessage userMessage = ChatMessage.builder()
+                        .id(userMessageId)
+                        .chatId(request.getChatId())
+                        .sessionId(request.getSessionId())
+                        .messageType(MessageType.GAME)
+                        .content(request.getMessage())
+                        .isAiResponse(false)
+                        .build();
+                // TODO 需要优化
+                return chatMessageRepository.save(userMessage);
+        }
+
+
+
+        /**
          * 构建提示词（带历史上下文）
          */
         private String buildPromptWithContext(
                         List<ChatMessage> historyMessages,
                         String currentQuestion,
                         String userId) {
-
                 StringBuilder prompt = new StringBuilder();
 
                 // 用户标识
@@ -357,69 +373,150 @@ public class LoveApp {
         /**
          * AI调用MCP服务
          */
-        // 引入这个类，我们的Spring AI MCP 服务，它在启动的时候，会自动去读取我们刚刚所写的 mcp-servers.json 配置文件
-        // 从中找到所有的工具，然后自动注册到这个工具提供者类上，我们就可以直接使用它了
-        @Resource
-        private ToolCallbackProvider toolCallbackProvider;
 
-        public String doChatWithMCP(String message, String chatId) {
-                ChatResponse chatResponse = chatClient
-                                .prompt()
-                                .user(message)
-                                .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                                                .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-                                .tools(toolCallbackProvider)
-                                .call()
-                                .chatResponse();
-                return chatResponse.getResult().getOutput().getText();
-        }
+//        public String doChatWithMCP(String message, String chatId) {
+//                ChatResponse chatResponse = chatClient
+//                                .prompt()
+//                                .user(message)
+//                                .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+//                                                .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+//                                .tools(toolCallbackProvider)
+//                                .call()
+//                                .chatResponse();
+//                return chatResponse.getResult().getOutput().getText();
+//        }
 
         // 这里我们就要定义一个格式了，定义一个恋爱报告的格式
         // 这个record语法可以快速的定义一个类，我们就可以理解为一个类，含有title、suggestion字段
         // 和定义方法的方法一样，这样一个类就定义好了
-        public record LoveReport(String title, List<String> suggestions) {
-
-        }
-
-        /**
-         * 结构化输出，恋爱报告功能，也就是将大模型的返回直接封装到实体类里面
-         */
-        public LoveReport doChatWithReport(String message, String chatId) {
-                LoveReport loveReport = chatClient
-                                .prompt()
-                                .system(SystemConstants.CHAT_SYSTEM_PROMPT + "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
-                                .user(message)
-                                .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                                                .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-                                .call()
-                                .entity(LoveReport.class);
-                log.info("loveReport: {}", loveReport);
-                return loveReport;
-        }
-
-        /**
-         * 心跳挽回战
-         */
-        public Flux<String> gameStreamChat(String message, String chatId) {
-                return gameClient.prompt()
-                                .user(message)
-                                .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                                                .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-                                .stream()
-                                .content();
-        }
+//        public record LoveReport(String title, List<String> suggestions) {
+//
+//        }
+//
+//        /**
+//         * 结构化输出，恋爱报告功能，也就是将大模型的返回直接封装到实体类里面
+//         */
+//        public LoveReport doChatWithReport(String message, String chatId) {
+//                LoveReport loveReport = chatClient
+//                                .prompt()
+//                                .system(SystemConstants.CHAT_SYSTEM_PROMPT + "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
+//                                .user(message)
+//                                .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+//                                                .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+//                                .call()
+//                                .entity(LoveReport.class);
+//                log.info("loveReport: {}", loveReport);
+//                return loveReport;
+//        }
 
         /**
          * 情绪返回
          */
-        public String doChatWithEmo(String message, String chatId) {
+        public GameChatVO doChatWithEmo(String message, String chatId) {
+                // 1.情绪分析
                 ChatResponse chatResponse = emoClient
-                                .prompt()
-                                .user(message)
-                                .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-                                                .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-                                .call()
-                                .chatResponse();
-                return chatResponse.getResult().getOutput().getText();
+                        .prompt()
+                        .user(message)
+                        .call()
+                        .chatResponse();
+                String emo = chatResponse.getResult().getOutput().getText();
+                // 2.创建 sessionId ，并构造对象返回
+                String sessionId = SessionIdGenerator.generateSessionId(Long.valueOf(chatId));
+
+                // 3.创建一个游戏会话，并保存，同时保存这轮游戏中的女友情绪
+                ChatSession gameChatSession = ChatSession.builder()
+                        .sessionName(GAME_SESSION_NAME)
+                        .id(sessionId)
+                        .chatId(chatId)
+                        .build();
+                chatSessionRepository.save(gameChatSession);
+                ChatMessage chatMessage = ChatMessage.builder()
+                        .sessionId(sessionId)
+                        .chatId(chatId)
+                        .messageType(MessageType.GAME)
+                        .isAiResponse(false)
+                        .content("女友生气的原因：" + message + ",女友现在的心情：" + emo)
+                        .build();
+                chatMessageRepository.save(chatMessage);
+
+                // 4.构建返回对象，并返回
+                return GameChatVO.builder()
+                        .emo(emo)
+                        .sessionId(sessionId)
+                        .build();
+        }
+
+
+        /**
+         * 心跳挽回战
+         */
+        public Flux<String> gameStreamChat(ChatRequest request) {
+                // 1.同步保存用户消息
+                ChatMessage chatMessage = saveUserGameMessage(request);
+
+                // 2. 获取历史上下文（排除刚保存的用户消息），查询了 10 条历史记录
+                List<ChatMessage> historyMessages = chatMessageRepository
+                        .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
+                log.info("获取用户，id={}，历史上下文，数量={}", request.getChatId(), historyMessages.size());
+
+                // 3. 基于对话历史以及最新消息，拼接提示词
+                String fullPrompt = buildPromptWithContext(
+                        historyMessages,
+                        request.getMessage(),
+                        request.getChatId());
+                log.info("用户id={}，完整提示词构建完成，长度={}", request.getChatId(), fullPrompt.length());
+                if (log.isDebugEnabled()) {
+                        log.info("提示词内容:\n{}", fullPrompt);
+                }
+
+                // 4. 创建 StringBuilder 来累积 AI 的流式响应
+                StringBuilder aiResponseBuilder = new StringBuilder();
+                String aiMessageId = UUID.randomUUID().toString();
+
+                // 5. 流式调用AI并累积响应
+                return gameClient
+                        .prompt()
+                        .user(fullPrompt)
+                        .stream()
+                        .content() // 流式处理
+                        // 关键：doOnNext累积每个chunk
+                        .doOnNext(chunk -> {
+                                aiResponseBuilder.append(chunk);
+                        })
+                        // 关键：doOnComplete 在流式结束后保存
+                        .doOnComplete(() -> {
+                                // 同步保存完整的 AI 回复
+                                String aiContent = aiResponseBuilder.toString();
+                                // 构建消息实体
+                                ChatMessage aiMessage = ChatMessage.builder()
+                                        .id(aiMessageId)
+                                        .chatId(request.getChatId())
+                                        .sessionId(request.getSessionId())
+                                        .content(aiContent)
+                                        .messageType(MessageType.GAME)
+                                        .isAiResponse(true)
+                                        .build();
+                                // 保存到 MongoDB
+                                chatMessageRepository.save(aiMessage);
+                                log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(), aiContent.length());
+                        })
+                        // 关键：doOnError处理异常
+                        .doOnError(error -> {
+                                log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
+                                // 即使出错，也保存已有的部分内容
+                                if (aiResponseBuilder.length() > 0) {
+                                        String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
+                                        ChatMessage errorMessage = ChatMessage.builder()
+                                                .id(aiMessageId)
+                                                .chatId(request.getChatId())
+                                                .sessionId(request.getSessionId())
+                                                .content(errorContent)
+                                                .messageType(MessageType.GAME)
+                                                .isAiResponse(true)
+                                                .build();
+                                        chatMessageRepository.save(errorMessage);
+                                        log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(), errorContent.length());
+                                }
+                        });
         }
 }

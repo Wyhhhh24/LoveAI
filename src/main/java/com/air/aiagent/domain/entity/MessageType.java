@@ -5,10 +5,7 @@ package com.air.aiagent.domain.entity;
  */
 public enum MessageType {
     TEXT("文本消息"),
-    IMAGE("图片消息"),
-    VOICE("语音消息"),
-    FILE("文件消息"),
-    SYSTEM("系统消息");
+    GAME("游戏消息");
 
     private final String description;
 
