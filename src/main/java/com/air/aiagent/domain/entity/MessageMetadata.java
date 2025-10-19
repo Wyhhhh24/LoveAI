@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -26,4 +27,9 @@ public class MessageMetadata {
     private Integer responseTimeMs;
 
     private Map<String, Object> customData;
+
+    /**
+     * 推荐的商品ID列表（新增）
+     */
+    private List<Long> recommendedProductIds;
 }

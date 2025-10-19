@@ -1,8 +1,12 @@
 package com.air.aiagent.domain.vo;
+import com.air.aiagent.domain.entity.MessageMetadata;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.data.mongodb.core.mapping.Field;
+
+import java.util.List;
 
 /**
  * @author WyH524
@@ -33,6 +37,17 @@ public class ChatMessageVO {
      * 消息内容
      */
     private String content;
+
+
+    /**
+     * 消息元数据
+     */
+    private MessageMetadata metadata;
+
+    /**
+     * 推荐的商品列表（如果有）
+     */
+    private List<ProductRecommendVO> recommendedProducts;  // ← 新增
 
     /**
      * 是否为AI回复

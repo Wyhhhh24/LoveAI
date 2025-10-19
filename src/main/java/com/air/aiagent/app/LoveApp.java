@@ -1,18 +1,19 @@
 package com.air.aiagent.app;
 
 import cn.hutool.core.lang.UUID;
+import cn.hutool.json.JSONUtil;
 import com.air.aiagent.advisor.MyLoggerAdvisor;
 import com.air.aiagent.constant.SystemConstants;
 import com.air.aiagent.domain.dto.ChatRequest;
-import com.air.aiagent.domain.entity.ChatMessage;
-import com.air.aiagent.domain.entity.ChatSession;
-import com.air.aiagent.domain.entity.MessageMetadata;
-import com.air.aiagent.domain.entity.MessageType;
+import com.air.aiagent.domain.entity.*;
 import com.air.aiagent.domain.vo.GameChatVO;
+import com.air.aiagent.domain.vo.ProductRecommendVO;
 import com.air.aiagent.mapper.repository.ChatMessageRepository;
 import com.air.aiagent.mapper.repository.ChatSessionRepository;
 import com.air.aiagent.service.impl.AsyncTaskService;
 import com.air.aiagent.service.impl.ChatSessionService;
+import com.air.aiagent.service.impl.ProductRecommendService;
+import com.air.aiagent.utils.IntentRecognizer;
 import com.air.aiagent.utils.SessionIdGenerator;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +22,9 @@ import org.springframework.ai.chat.client.advisor.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.InMemoryChatMemory;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
@@ -31,7 +35,12 @@ import reactor.core.publisher.Flux;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static com.air.aiagent.constant.Constant.GAME_SESSION_NAME;
 import static org.springframework.ai.chat.client.advisor.AbstractChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY;
@@ -137,10 +146,170 @@ public class LoveApp {
         private ToolCallbackProvider toolCallbackProvider;
 
         /**
+         * 意图识别器
+         */
+        @Resource
+        private IntentRecognizer intentRecognizer;
+
+        /**
+         * 商品推荐服务
+         */
+        @Resource
+        private ProductRecommendService productRecommendService;
+
+        /**
          * AI 调用工具能力
          */
         @Resource
         private ToolCallback[] allTools;
+
+
+        /**
+         * 智能对话入口 - 根据意图选择是否推荐商品
+         */
+        public Flux<String> smartChat(ChatRequest request) {
+                // 1. 调用意图识别，判断当前有没有购买意图
+                boolean needRecommend = intentRecognizer.needProductRecommend(request.getMessage());
+
+                // 2. 根据意图选择处理方式
+                if (needRecommend) {
+                        log.info("检测到购买意图，启用商品推荐模式");
+                        String scene = intentRecognizer.recognizeScene(request.getMessage());
+                        return chatWithProductRecommend(request,scene);
+                } else {
+                        log.info("纯咨询对话，不推荐商品");
+                        return doChatWithRagAndTools(request);  // 你现有的方法
+                }
+        }
+
+
+        /**
+         * 带商品推荐的 RAG 对话
+         */
+        private Flux<String> chatWithProductRecommend(ChatRequest request, String scene) {
+                // 0.同步保存用户消息
+                saveUserMessage(request);
+
+                // 1.查询历史对话
+                List<ChatMessage> historyMessages = chatMessageRepository
+                        .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
+
+                if (historyMessages.isEmpty()) {
+                        // 更新会话名称
+                        boolean success = chatSessionService.updateSessionName(
+                                request.getSessionId(),
+                                request.getChatId(),
+                                request.getMessage()
+                        );
+                        if (success) {
+                                log.info("会话名称已更新为: {}", request.getMessage());
+                        }
+                }
+
+
+                // 2.根据场景，从数据库中查询相关商品
+                List<Product> products = productRecommendService.recommendByScene(scene, 3);
+
+                // 3.如果没有商品，降级为普通对话
+                if (products.isEmpty()) {
+                        log.warn("场景 [{}] 未找到相关商品，降级为纯咨询模式", scene);
+                        return doChatWithRagAndTools(request);
+                }
+
+                // 4.将商品 List 转换成 String ，并构造包含商品信息的系统提示词
+                String productInfo = formatProductsForPrompt(products);
+                String enhancedSystemPrompt =SystemConstants.ENHANCEDSYSTEMPROMPT.formatted(scene, productInfo);
+
+                // 5.构建完整提示词
+                String fullPrompt = buildPromptWithContext(
+                        historyMessages,
+                        request.getMessage(),
+                        request.getChatId());
+                log.info("用户 id={}，完整提示词构建完成，长度={}", request.getChatId(), fullPrompt.length());
+
+                // 7. 创建 StringBuilder 来累积 AI 的流式响应
+                StringBuilder aiResponseBuilder = new StringBuilder();
+                String aiMessageId = UUID.randomUUID().toString();
+                long startTime = System.currentTimeMillis();
+
+                // 9. 处理流式响应，提取商品ID
+                AtomicReference<List<Long>> recommendedProductIds = new AtomicReference<>(new ArrayList<>());
+
+                return chatClient
+                        .prompt()
+                        .system(enhancedSystemPrompt)
+                        .user(fullPrompt)
+                        .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
+                        .stream()
+                        .content()  // ✅ 改为 content()，直接返回 Flux<String>
+                        .doOnNext(chunk -> aiResponseBuilder.append(chunk))  // ✅ chunk 是 String
+                        .doOnComplete(() -> {
+                                long duration = System.currentTimeMillis() - startTime;
+                                String reply = aiResponseBuilder.toString();
+
+                                // 提取商品ID
+                                List<Long> productIds = extractProductIds(reply);
+                                recommendedProductIds.set(productIds);
+
+                                // 清理标记符，也就是 ai 回复中可能包含一些标记符
+                                String cleanReply = removeProductMarkers(reply);
+
+                                // 保存消息
+                                ChatMessage aiMessage = ChatMessage.builder()
+                                        .id(aiMessageId)
+                                        .chatId(request.getChatId())
+                                        .sessionId(request.getSessionId())
+                                        .content(cleanReply)
+                                        .messageType(MessageType.TEXT)
+                                        .isAiResponse(true)
+                                        .metadata(MessageMetadata.builder()
+                                                .responseTimeMs((int) duration)
+                                                .tokenCount(estimateTokens(cleanReply))
+                                                .recommendedProductIds(productIds)  // ← 保存商品ID列表
+                                                .build())
+                                        .build();
+                                chatMessageRepository.save(aiMessage);
+
+                                // 更新计数
+                                chatSessionService.incrementMessageCount(request.getSessionId());
+                                chatSessionService.incrementMessageCount(request.getSessionId());
+                        })
+                        .doOnError(error -> {
+                                log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
+                                // 即使出错，也保存已有的部分内容
+                                if (aiResponseBuilder.length() > 0) {
+                                        String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
+                                        ChatMessage errorMessage = ChatMessage.builder()
+                                                .id(aiMessageId)
+                                                .chatId(request.getChatId())
+                                                .sessionId(request.getSessionId())
+                                                .content(errorContent)
+                                                .messageType(MessageType.TEXT)
+                                                .isAiResponse(true)
+                                                .build();
+                                        chatMessageRepository.save(errorMessage);
+                                        log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
+                                                errorContent.length());
+
+                                        // 更新会话的消息计数（+2，用户消息1条 + AI错误回复1条）
+                                        chatSessionService.incrementMessageCount(request.getSessionId());
+                                        chatSessionService.incrementMessageCount(request.getSessionId());
+                                }
+                        })
+                        .concatWith(Flux.defer(() -> {
+                                List<Long> ids = recommendedProductIds.get();
+                                if (ids.isEmpty()) {
+                                        return Flux.empty();
+                                }
+
+                                List<ProductRecommendVO> vos = productRecommendService.getProductVOsByIds(ids);
+                                String productJson = "\n[PRODUCTS]" + JSONUtil.toJsonStr(vos) + "[/PRODUCTS]";
+
+                                log.info("返回推荐商品，数量={}", vos.size());
+                                return Flux.just(productJson);
+                        }));
+        }
+
 
         // RAG 知识库进行对话
         public Flux<String> doChatWithRagAndTools(ChatRequest request) {
@@ -253,6 +422,54 @@ public class LoveApp {
                         });
         }
 
+
+
+        /**
+         * 将商品列表格式化为提示词
+         */
+        private String formatProductsForPrompt(List<Product> products) {
+                return products.stream()
+                        .map(p -> String.format(
+                                "商品ID: %d\n名称: %s\n价格: %.2f元\n描述: %s\n适用: %s\n---",
+                                p.getId(),
+                                p.getProductName(),
+                                p.getPrice(),
+                                p.getDescription(),
+                                p.getScene()
+                        ))
+                        .collect(Collectors.joining("\n"));
+        }
+
+
+        /**
+         * 从 AI 回复中提取推荐的商品ID
+         * 解析格式：【推荐商品】商品ID: 1\n商品ID: 3【结束】
+         */
+        private List<Long> extractProductIds(String aiReply) {
+                List<Long> ids = new ArrayList<>();
+
+                // 使用正则提取 "商品ID: 数字"
+                Pattern pattern = Pattern.compile("商品ID[：:]*\\s*(\\d+)");
+                Matcher matcher = pattern.matcher(aiReply);
+
+                while (matcher.find()) {
+                        ids.add(Long.parseLong(matcher.group(1)));
+                }
+
+                log.info("从AI回复中提取到商品ID: {}", ids);
+                return ids;
+        }
+
+        /**
+         * 移除商品推荐的标记符，只保留用户可读的内容
+         */
+        private String removeProductMarkers(String aiReply) {
+                return aiReply
+                        .replaceAll("【推荐商品】[\\s\\S]*?【结束】", "")
+                        .trim();
+        }
+
+
         /**
          * 估算Token数量，后面可以从 ai 回复中进行提取
          */
@@ -330,7 +547,7 @@ public class LoveApp {
                 prompt.append("用户: ").append(currentQuestion).append("\n\n");
 
                 // 指令
-                prompt.append("请根据历史对话上下文，针对性地回答用户的当前问题。");
+                prompt.append("请根据历史对话上下文，针对性地回答用户的当前问题");
 
                 return prompt.toString();
         }

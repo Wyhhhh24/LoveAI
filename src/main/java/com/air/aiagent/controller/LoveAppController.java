@@ -1,5 +1,4 @@
 package com.air.aiagent.controller;
-
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.air.aiagent.annotation.ClearContext;
@@ -11,6 +10,7 @@ import com.air.aiagent.context.UserContext;
 import com.air.aiagent.domain.dto.ChatRequest;
 import com.air.aiagent.domain.entity.ChatMessage;
 import com.air.aiagent.domain.entity.ChatSession;
+import com.air.aiagent.domain.entity.Product;
 import com.air.aiagent.domain.entity.User;
 import com.air.aiagent.domain.vo.*;
 import com.air.aiagent.exception.BusinessException;
@@ -21,9 +21,9 @@ import com.air.aiagent.service.UserFileService;
 import com.air.aiagent.service.UserService;
 import com.air.aiagent.service.impl.ChatMessageService;
 import com.air.aiagent.service.impl.ChatSessionService;
+import com.air.aiagent.service.impl.ProductRecommendService;
 import com.air.aiagent.utils.SessionIdGenerator;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -66,6 +66,9 @@ public class LoveAppController {
     @Resource
     private ChatMessageService chatMessageService;
 
+    @Resource
+    private ProductRecommendService productRecommendService;
+
     /**
      * RAG知识库对话，支持工具调用
      */
@@ -81,7 +84,8 @@ public class LoveAppController {
             // 2.如果该 session 不存在，抛异常
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "无效的 sessionId");
         }
-        return loveApp.doChatWithRagAndTools(request);
+//        return loveApp.doChatWithRagAndTools(request);
+        return loveApp.smartChat(request);
     }
 
     // @RequestMapping(value = "/game", produces = "text/html;charset=UTF-8")
@@ -99,6 +103,7 @@ public class LoveAppController {
         GameChatVO gameChatVO = loveApp.doChatWithEmo(request.getMessage(), request.getChatId());
         return ResultUtils.success(gameChatVO);
     }
+
 
     @LoginCheck
     @PostMapping(value = "/game/chat", produces = "text/html;charset=UTF-8")
@@ -186,12 +191,32 @@ public class LoveAppController {
         // 6.根据会话Id 查找该记录中的聊天历史，包含最新消息在内的最近10条记录，转换成 VO
         List<ChatMessage> latestChatMessageList = chatMessageRepository.findHistoryExcludingLatest(chatSession.getId(),
                 10, 0);
-        List<ChatMessageVO> latestChatMessageVOList = latestChatMessageList.stream().map(chatMessage -> {
-            return BeanUtil.copyProperties(chatMessage, ChatMessageVO.class);
-        }).toList();
+
+        // 转换为VO，包含商品信息
+        List<ChatMessageVO> vos = latestChatMessageList.stream()
+                .map(message -> {
+                    ChatMessageVO vo = new ChatMessageVO();
+                    vo.setId(message.getId());
+                    vo.setChatId(message.getChatId());
+                    vo.setSessionId(message.getSessionId());
+                    vo.setContent(message.getContent());
+                    vo.setIsAiResponse(message.getIsAiResponse());
+
+                    // 如果有推荐商品，查询商品详情
+                    if (message.getMetadata() != null &&
+                            message.getMetadata().getRecommendedProductIds() != null &&
+                            !message.getMetadata().getRecommendedProductIds().isEmpty()) {
+
+                        List<ProductRecommendVO> products = productRecommendService
+                                .getProductVOsByIds(message.getMetadata().getRecommendedProductIds());
+                        vo.setRecommendedProducts(products);
+                    }
+                    return vo;
+                })
+                .toList();
 
         // 7.进行封装返回
-        chatHistory.setChatMessageVOList(latestChatMessageVOList);
+        chatHistory.setChatMessageVOList(vos);
         return ResultUtils.success(chatHistory);
     }
 
