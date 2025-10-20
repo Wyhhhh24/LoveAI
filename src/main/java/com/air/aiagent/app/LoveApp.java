@@ -7,7 +7,7 @@ import com.air.aiagent.constant.SystemConstants;
 import com.air.aiagent.domain.dto.ChatRequest;
 import com.air.aiagent.domain.entity.*;
 import com.air.aiagent.domain.vo.GameChatVO;
-import com.air.aiagent.domain.vo.ProductRecommendVO;
+import com.air.aiagent.domain.vo.ProductVO;
 import com.air.aiagent.mapper.repository.ChatMessageRepository;
 import com.air.aiagent.mapper.repository.ChatSessionRepository;
 import com.air.aiagent.service.impl.AsyncTaskService;
@@ -20,11 +20,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.QuestionAnswerAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.memory.InMemoryChatMemory;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
-import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.tool.ToolCallback;
@@ -33,7 +28,6 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -193,7 +187,7 @@ public class LoveApp {
                 // 1.查询历史对话
                 List<ChatMessage> historyMessages = chatMessageRepository
                         .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
-
+                // 如果历史对话为空，当前消息作为会话名称
                 if (historyMessages.isEmpty()) {
                         // 更新会话名称
                         boolean success = chatSessionService.updateSessionName(
@@ -205,7 +199,6 @@ public class LoveApp {
                                 log.info("会话名称已更新为: {}", request.getMessage());
                         }
                 }
-
 
                 // 2.根据场景，从数据库中查询相关商品
                 List<Product> products = productRecommendService.recommendByScene(scene, 3);
@@ -241,8 +234,8 @@ public class LoveApp {
                         .user(fullPrompt)
                         .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
                         .stream()
-                        .content()  // ✅ 改为 content()，直接返回 Flux<String>
-                        .doOnNext(chunk -> aiResponseBuilder.append(chunk))  // ✅ chunk 是 String
+                        .content()
+                        .doOnNext(chunk -> aiResponseBuilder.append(chunk))
                         .doOnComplete(() -> {
                                 long duration = System.currentTimeMillis() - startTime;
                                 String reply = aiResponseBuilder.toString();
@@ -265,9 +258,10 @@ public class LoveApp {
                                         .metadata(MessageMetadata.builder()
                                                 .responseTimeMs((int) duration)
                                                 .tokenCount(estimateTokens(cleanReply))
-                                                .recommendedProductIds(productIds)  // ← 保存商品ID列表
+                                                .recommendedProductIds(productIds)  // 如果该条记录推荐了商品 ID 列表，就保存
                                                 .build())
                                         .build();
+                                // 保存消息到数据库
                                 chatMessageRepository.save(aiMessage);
 
                                 // 更新计数
@@ -291,7 +285,7 @@ public class LoveApp {
                                         log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
                                                 errorContent.length());
 
-                                        // 更新会话的消息计数（+2，用户消息1条 + AI错误回复1条）
+                                        // 更新会话的消息计数（用户消息 1 条 ， AI错误回复1条）
                                         chatSessionService.incrementMessageCount(request.getSessionId());
                                         chatSessionService.incrementMessageCount(request.getSessionId());
                                 }
@@ -302,7 +296,7 @@ public class LoveApp {
                                         return Flux.empty();
                                 }
 
-                                List<ProductRecommendVO> vos = productRecommendService.getProductVOsByIds(ids);
+                                List<ProductVO> vos = productRecommendService.getProductVOsByIds(ids);
                                 String productJson = "\n[PRODUCTS]" + JSONUtil.toJsonStr(vos) + "[/PRODUCTS]";
 
                                 log.info("返回推荐商品，数量={}", vos.size());
@@ -311,7 +305,9 @@ public class LoveApp {
         }
 
 
-        // RAG 知识库进行对话
+        /**
+         * 基于知识库文档，支持工具调用
+         */
         public Flux<String> doChatWithRagAndTools(ChatRequest request) {
                 // 1. 同步保存用户消息
                 saveUserMessage(request);
@@ -390,8 +386,7 @@ public class LoveApp {
                                                 .build();
                                 // 保存到 MongoDB
                                 chatMessageRepository.save(aiMessage);
-                                log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(),
-                                                aiContent.length());
+                                log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(), aiContent.length());
 
                                 // 更新会话的消息计数（+2，用户消息1条 + AI回复1条）
                                 chatSessionService.incrementMessageCount(request.getSessionId());
@@ -421,7 +416,6 @@ public class LoveApp {
                                 }
                         });
         }
-
 
 
         /**

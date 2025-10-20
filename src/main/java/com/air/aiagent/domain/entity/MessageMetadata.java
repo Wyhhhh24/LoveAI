@@ -16,20 +16,19 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class MessageMetadata {
-    private String model;
-
-    private String version;
-
-    private Integer tokenCount;
-
-    private Double confidence;
-
-    private Integer responseTimeMs;
-
-    private Map<String, Object> customData;
 
     /**
-     * 推荐的商品ID列表（新增）
+     * token 消耗数
+     */
+    private Integer tokenCount;
+
+    /**
+     * 响应时间
+     */
+    private Integer responseTimeMs;
+
+    /**
+     * 推荐的商品ID列表
      */
     private List<Long> recommendedProductIds;
 }

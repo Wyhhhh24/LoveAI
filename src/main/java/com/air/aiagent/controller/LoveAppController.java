@@ -1,4 +1,5 @@
 package com.air.aiagent.controller;
+
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.air.aiagent.annotation.ClearContext;
@@ -10,7 +11,6 @@ import com.air.aiagent.context.UserContext;
 import com.air.aiagent.domain.dto.ChatRequest;
 import com.air.aiagent.domain.entity.ChatMessage;
 import com.air.aiagent.domain.entity.ChatSession;
-import com.air.aiagent.domain.entity.Product;
 import com.air.aiagent.domain.entity.User;
 import com.air.aiagent.domain.vo.*;
 import com.air.aiagent.exception.BusinessException;
@@ -24,6 +24,7 @@ import com.air.aiagent.service.impl.ChatSessionService;
 import com.air.aiagent.service.impl.ProductRecommendService;
 import com.air.aiagent.utils.SessionIdGenerator;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -84,7 +85,6 @@ public class LoveAppController {
             // 2.如果该 session 不存在，抛异常
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "无效的 sessionId");
         }
-//        return loveApp.doChatWithRagAndTools(request);
         return loveApp.smartChat(request);
     }
 
@@ -103,7 +103,6 @@ public class LoveAppController {
         GameChatVO gameChatVO = loveApp.doChatWithEmo(request.getMessage(), request.getChatId());
         return ResultUtils.success(gameChatVO);
     }
-
 
     @LoginCheck
     @PostMapping(value = "/game/chat", produces = "text/html;charset=UTF-8")
@@ -152,8 +151,18 @@ public class LoveAppController {
         List<ChatMessage> latestChatMessageList = chatMessageRepository
                 .findHistoryExcludingLatest(latestChatSession.getId(), 10, 0);
         List<ChatMessageVO> latestChatMessageVOList = latestChatMessageList.stream().map(chatMessage -> {
-            ChatMessageVO chatMessageVO = new ChatMessageVO();
-            BeanUtil.copyProperties(chatMessage, chatMessageVO);
+            ChatMessageVO chatMessageVO = ChatMessageVO.builder()
+                    .id(chatMessage.getId())
+                    .chatId(chatMessage.getChatId())
+                    .sessionId(chatMessage.getSessionId())
+                    .content(chatMessage.getContent())
+                    .isAiResponse(chatMessage.getIsAiResponse())
+                    .build();
+            if(chatMessage.getMetadata() != null
+                    && chatMessage.getMetadata().getRecommendedProductIds() != null
+                    && !chatMessage.getMetadata().getRecommendedProductIds().isEmpty()){
+                chatMessageVO.setRecommendedProducts(productRecommendService.getProductVOsByIds(chatMessage.getMetadata().getRecommendedProductIds()));
+            }
             return chatMessageVO;
         }).toList();
 
@@ -161,6 +170,7 @@ public class LoveAppController {
         chatHistory.setChatMessageVOList(latestChatMessageVOList);
         return ResultUtils.success(chatHistory);
     }
+
 
     /**
      * 根据 sessionId 查询该会话的聊天记录
@@ -189,34 +199,26 @@ public class LoveAppController {
         chatHistory.setSessionId(chatSession.getId());
 
         // 6.根据会话Id 查找该记录中的聊天历史，包含最新消息在内的最近10条记录，转换成 VO
-        List<ChatMessage> latestChatMessageList = chatMessageRepository.findHistoryExcludingLatest(chatSession.getId(),
-                10, 0);
-
-        // 转换为VO，包含商品信息
-        List<ChatMessageVO> vos = latestChatMessageList.stream()
-                .map(message -> {
-                    ChatMessageVO vo = new ChatMessageVO();
-                    vo.setId(message.getId());
-                    vo.setChatId(message.getChatId());
-                    vo.setSessionId(message.getSessionId());
-                    vo.setContent(message.getContent());
-                    vo.setIsAiResponse(message.getIsAiResponse());
-
-                    // 如果有推荐商品，查询商品详情
-                    if (message.getMetadata() != null &&
-                            message.getMetadata().getRecommendedProductIds() != null &&
-                            !message.getMetadata().getRecommendedProductIds().isEmpty()) {
-
-                        List<ProductRecommendVO> products = productRecommendService
-                                .getProductVOsByIds(message.getMetadata().getRecommendedProductIds());
-                        vo.setRecommendedProducts(products);
-                    }
-                    return vo;
-                })
-                .toList();
+        List<ChatMessage> latestChatMessageList = chatMessageRepository
+                .findHistoryExcludingLatest(chatSession.getId(), 10, 0);
+        List<ChatMessageVO> latestChatMessageVOList = latestChatMessageList.stream().map(chatMessage -> {
+            ChatMessageVO chatMessageVO = ChatMessageVO.builder()
+                    .id(chatMessage.getId())
+                    .chatId(chatMessage.getChatId())
+                    .sessionId(chatMessage.getSessionId())
+                    .content(chatMessage.getContent())
+                    .isAiResponse(chatMessage.getIsAiResponse())
+                    .build();
+            if(chatMessage.getMetadata() != null
+                    && chatMessage.getMetadata().getRecommendedProductIds() != null
+                    && !chatMessage.getMetadata().getRecommendedProductIds().isEmpty()){
+                chatMessageVO.setRecommendedProducts(productRecommendService.getProductVOsByIds(chatMessage.getMetadata().getRecommendedProductIds()));
+            }
+            return chatMessageVO;
+        }).toList();
 
         // 7.进行封装返回
-        chatHistory.setChatMessageVOList(vos);
+        chatHistory.setChatMessageVOList(latestChatMessageVOList);
         return ResultUtils.success(chatHistory);
     }
 
@@ -251,7 +253,8 @@ public class LoveAppController {
      */
     @LoginCheck
     @PostMapping("/getChatSessionList")
-    public BaseResponse<List<ChatSessionVO>> getChatSessionList(@RequestBody ChatRequest request, HttpServletRequest httpServletRequest) {
+    public BaseResponse<List<ChatSessionVO>> getChatSessionList(@RequestBody ChatRequest request,
+            HttpServletRequest httpServletRequest) {
         // 1.根据 用户Id 查询所有会话记录
         List<ChatSession> chatSessionList = chatSessionRepository.findByChatId(request.getChatId());
         if (chatSessionList.isEmpty()) {

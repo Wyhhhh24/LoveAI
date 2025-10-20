@@ -2,13 +2,12 @@ package com.air.aiagent.domain.vo;
 
 import lombok.Data;
 import java.math.BigDecimal;
-import java.util.List;
 
 /**
  * 商品推荐VO
  */
 @Data
-public class ProductRecommendVO {
+public class ProductVO {
     
     /**
      * 商品ID
@@ -44,9 +43,4 @@ public class ProductRecommendVO {
      * 跳转链接
      */
     private String jumpUrl;
-
-    /**
-     * AI推荐理由（可选）
-     */
-    private String recommendReason;
 }

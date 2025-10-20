@@ -1,11 +1,10 @@
 package com.air.aiagent.service.impl;
 import com.air.aiagent.domain.entity.Product;
-import com.air.aiagent.domain.vo.ProductRecommendVO;
+import com.air.aiagent.domain.vo.ProductVO;
 import com.air.aiagent.mapper.ProductMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,35 +52,37 @@ public class ProductRecommendService {
         return productMapper.selectHotByCategory(category, maxCount);
     }
     
-    /**
-     * 转换为VO
-     * 
-     * @param products 商品列表
-     * @return VO列表
-     */
-    public List<ProductRecommendVO> convertToVO(List<Product> products) {
-        return products.stream()
-            .map(product -> {
-                ProductRecommendVO vo = new ProductRecommendVO();
-                BeanUtils.copyProperties(product, vo);
-                vo.setProductId(product.getId());
-                return vo;
-            })
-            .collect(Collectors.toList());
-    }
-    
+
     /**
      * 根据商品ID批量查询并转换为VO
      * 
      * @param productIds 商品ID列表
      * @return VO列表
      */
-    public List<ProductRecommendVO> getProductVOsByIds(List<Long> productIds) {
+    public List<ProductVO> getProductVOsByIds(List<Long> productIds) {
         if (productIds == null || productIds.isEmpty()) {
             return new ArrayList<>();
         }
-        
+        // 根据 id 列表，批量查询商品
         List<Product> products = productMapper.selectBatchIds(productIds);
         return convertToVO(products);
+    }
+
+
+    /**
+     * 转换为 VO 列表
+     *
+     * @param products 商品列表
+     * @return VO列表
+     */
+    public List<ProductVO> convertToVO(List<Product> products) {
+        return products.stream()
+                .map(product -> {
+                    ProductVO vo = new ProductVO();
+                    BeanUtils.copyProperties(product, vo);
+                    vo.setProductId(product.getId());
+                    return vo;
+                })
+                .collect(Collectors.toList());
     }
 }
