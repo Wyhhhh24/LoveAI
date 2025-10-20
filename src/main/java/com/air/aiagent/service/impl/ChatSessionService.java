@@ -23,30 +23,14 @@ public class ChatSessionService {
 
     private final MongoTemplate mongoTemplate;
 
+
     /**
-     * 更新会话名称
-     * 
-     * @param id          会话ID
-     * @param sessionName 新的会话名称
-     * @return 是否更新成功
+     * 保存会话记录
      */
-    public boolean updateSessionName(String id, String sessionName) {
-        Query query = new Query(Criteria.where("_id").is(id));
-        Update update = new Update()
-                .set("session_name", sessionName)
-                .set("updated_at", LocalDateTime.now()); // 同时更新时间
-
-        var result = mongoTemplate.updateFirst(query, update, ChatSession.class);
-
-        boolean success = result.getModifiedCount() > 0;
-
-        if (success) {
-            log.info("会话名称已更新，id={}, newName={}", id, sessionName);
-        } else {
-            log.warn("会话不存在或名称未改变，id={}", id);
-        }
-        return success;
+    public void save(ChatSession session) {
+        chatSessionRepository.save(session);
     }
+
 
     /**
      * 获取用户最新的会话
@@ -56,18 +40,34 @@ public class ChatSessionService {
         return result.orElse(new ChatSession());
     }
 
+
+    /**
+     * 根据用户ID查找会话
+     */
+    public List<ChatSession> findByChatId(String userId) {
+        return chatSessionRepository.findByChatId(userId);
+    }
+
+    /**
+     * 判断该 sessionId 对应的 session 是否存在
+     */
+    public Optional<ChatSession> findById(String sessionId){
+        return chatSessionRepository.findById(sessionId);
+    }
+
+
     /**
      * 更新会话名称（带用户验证）
      * 
-     * @param id          会话ID
+     * @param sessionId          会话ID
      * @param userId      用户ID（防止越权）
      * @param sessionName 新的会话名称
      * @return 是否更新成功
      */
-    public boolean updateSessionName(String id, String userId, String sessionName) {
+    public boolean updateSessionName(String sessionId, String userId, String sessionName) {
         Query query = new Query(
-                Criteria.where("_id").is(id)
-                        .and("chat_id").is(userId) // 验证所有权
+                Criteria.where("_id").is(sessionId)
+                        .and("chat_id").is(userId) // 验证所有权，该会话对应的用户 ID 是否一致
         );
 
         Update update = new Update()
@@ -80,12 +80,13 @@ public class ChatSessionService {
 
         if (success) {
             log.info("会话名称已更新，id={}, userId={}, newName={}",
-                    id, userId, sessionName);
+                    sessionId, userId, sessionName);
         } else {
-            log.warn("会话不存在或无权限，id={}, userId={}", id, userId);
+            log.warn("会话不存在或无权限，id={}, userId={}", sessionId, userId);
         }
         return success;
     }
+
 
     /**
      * 根据 chatId 以及 sessionId 查询对应的会话
@@ -95,6 +96,15 @@ public class ChatSessionService {
         return result.orElse(new ChatSession());
     }
 
+
+    /**
+     * 根据会话ID和用户ID查找会话
+     */
+    public Optional<ChatSession> findByIdAndChatId(String id,String chatId){
+        return chatSessionRepository.findByIdAndChatId(id, chatId);
+    }
+
+
     /**
      * 根据 sessionId 以及 chatId 删除对应的会话
      * 
@@ -103,6 +113,20 @@ public class ChatSessionService {
     public long deleteSession(String id, String chatId) {
         return chatSessionRepository.deleteByIdAndChatId(id, chatId);
     }
+
+
+    /**
+     * 增加消息计数
+     */
+    public void incrementMessageCount(String sessionId) {
+        Query query = new Query(Criteria.where("_id").is(sessionId));
+        Update update = new Update()
+                .inc("message_count", 2) // 原子递增
+                .set("updated_at", LocalDateTime.now());
+
+        mongoTemplate.updateFirst(query, update, ChatSession.class);
+    }
+
 
     /**
      * 更新会话状态
@@ -121,17 +145,6 @@ public class ChatSessionService {
         return result.getModifiedCount() > 0;
     }
 
-    /**
-     * 增加消息计数
-     */
-    public void incrementMessageCount(String sessionId) {
-        Query query = new Query(Criteria.where("_id").is(sessionId));
-        Update update = new Update()
-                .inc("message_count", 1) // 原子递增
-                .set("updated_at", LocalDateTime.now());
-
-        mongoTemplate.updateFirst(query, update, ChatSession.class);
-    }
 
     /**
      * 批量更新会话状态
@@ -147,21 +160,9 @@ public class ChatSessionService {
         return result.getModifiedCount();
     }
 
-    // ===== 其他CRUD方法 =====
-
-    public ChatSession createSession(String userId, String sessionName) {
-        ChatSession session = ChatSession.builder()
-                .chatId(userId)
-                .sessionName(sessionName)
-                .createdAt(LocalDateTime.now())
-                .updatedAt(LocalDateTime.now())
-                .isActive(true)
-                .messageCount(0)
-                .build();
-
-        return chatSessionRepository.save(session);
-    }
-
+    /**
+     * 根据用户ID和活跃状态查找会话
+     */
     public List<ChatSession> getUserActiveSessions(String userId) {
         return chatSessionRepository.findByChatIdAndIsActive(userId, true);
     }

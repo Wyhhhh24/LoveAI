@@ -40,22 +40,11 @@ public class ProductRecommendService {
         log.info("场景 [{}] 推荐商品数量: {}", scene, products.size());
         return products;
     }
-    
-    /**
-     * 根据分类推荐商品
-     * 
-     * @param category 分类：书籍/礼物
-     * @param maxCount 最多推荐数量
-     * @return 商品列表
-     */
-    public List<Product> recommendByCategory(String category, int maxCount) {
-        return productMapper.selectHotByCategory(category, maxCount);
-    }
-    
+
 
     /**
      * 根据商品ID批量查询并转换为VO
-     * 
+     *
      * @param productIds 商品ID列表
      * @return VO列表
      */
@@ -84,5 +73,17 @@ public class ProductRecommendService {
                     return vo;
                 })
                 .collect(Collectors.toList());
+    }
+
+
+    /**
+     * 根据分类推荐商品
+     * 
+     * @param category 分类：书籍/礼物
+     * @param maxCount 最多推荐数量
+     * @return 商品列表
+     */
+    public List<Product> recommendByCategory(String category, int maxCount) {
+        return productMapper.selectHotByCategory(category, maxCount);
     }
 }

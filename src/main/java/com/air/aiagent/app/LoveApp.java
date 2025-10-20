@@ -11,6 +11,7 @@ import com.air.aiagent.domain.vo.ProductVO;
 import com.air.aiagent.mapper.repository.ChatMessageRepository;
 import com.air.aiagent.mapper.repository.ChatSessionRepository;
 import com.air.aiagent.service.impl.AsyncTaskService;
+import com.air.aiagent.service.impl.ChatMessageService;
 import com.air.aiagent.service.impl.ChatSessionService;
 import com.air.aiagent.service.impl.ProductRecommendService;
 import com.air.aiagent.utils.IntentRecognizer;
@@ -27,7 +28,6 @@ import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
-
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +35,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-
 import static com.air.aiagent.constant.Constant.GAME_SESSION_NAME;
 import static org.springframework.ai.chat.client.advisor.AbstractChatMemoryAdvisor.CHAT_MEMORY_CONVERSATION_ID_KEY;
 import static org.springframework.ai.chat.client.advisor.AbstractChatMemoryAdvisor.CHAT_MEMORY_RETRIEVE_SIZE_KEY;
@@ -123,16 +122,11 @@ public class LoveApp {
         private VectorStore pgVectorVectorStore;
 
         @Resource
-        private ChatMessageRepository chatMessageRepository;
-
-        @Resource
-        private ChatSessionRepository chatSessionRepository;
-
-        @Resource
         private ChatSessionService chatSessionService;
 
         @Resource
-        private AsyncTaskService asyncTaskService;
+        private ChatMessageService chatMessageService;
+
 
         // 引入这个类，我们的Spring AI MCP 服务，它在启动的时候，会自动去读取我们刚刚所写的 mcp-servers.json 配置文件
         // 从中找到所有的工具，然后自动注册到这个工具提供者类上，我们就可以直接使用它了
@@ -185,7 +179,7 @@ public class LoveApp {
                 saveUserMessage(request);
 
                 // 1.查询历史对话
-                List<ChatMessage> historyMessages = chatMessageRepository
+                List<ChatMessage> historyMessages = chatMessageService
                         .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
                 // 如果历史对话为空，当前消息作为会话名称
                 if (historyMessages.isEmpty()) {
@@ -200,17 +194,18 @@ public class LoveApp {
                         }
                 }
 
-                // 2.根据场景，从数据库中查询相关商品
-                List<Product> products = productRecommendService.recommendByScene(scene, 3);
+                // 2.根据场景，从数据库中查询相关商品，只查询 3 个商品
+                List<Product> productList = productRecommendService.recommendByScene(scene, 3);
 
                 // 3.如果没有商品，降级为普通对话
-                if (products.isEmpty()) {
+                if (productList.isEmpty()) {
                         log.warn("场景 [{}] 未找到相关商品，降级为纯咨询模式", scene);
                         return doChatWithRagAndTools(request);
                 }
 
-                // 4.将商品 List 转换成 String ，并构造包含商品信息的系统提示词
-                String productInfo = formatProductsForPrompt(products);
+                // 4.将商品 List 转换成 String
+                String productInfo = formatProductsForPrompt(productList);
+                // 构造包含商品信息的系统提示词
                 String enhancedSystemPrompt =SystemConstants.ENHANCEDSYSTEMPROMPT.formatted(scene, productInfo);
 
                 // 5.构建完整提示词
@@ -222,25 +217,29 @@ public class LoveApp {
 
                 // 7. 创建 StringBuilder 来累积 AI 的流式响应
                 StringBuilder aiResponseBuilder = new StringBuilder();
+                // 创建一个 AI 回复的消息 ID
                 String aiMessageId = UUID.randomUUID().toString();
+                // 创建一个计时器，用于记录流式响应的时长
                 long startTime = System.currentTimeMillis();
 
-                // 9. 处理流式响应，提取商品ID
+                // 8. 处理流式响应，提取商品ID  todo 这里需要解读一下
                 AtomicReference<List<Long>> recommendedProductIds = new AtomicReference<>(new ArrayList<>());
 
                 return chatClient
                         .prompt()
-                        .system(enhancedSystemPrompt)
+                        .system(enhancedSystemPrompt) // 设置新的系统提示词，推荐商品提示词
                         .user(fullPrompt)
                         .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
                         .stream()
                         .content()
-                        .doOnNext(chunk -> aiResponseBuilder.append(chunk))
+                        .doOnNext(
+                                chunk -> aiResponseBuilder.append(chunk)
+                        )
                         .doOnComplete(() -> {
                                 long duration = System.currentTimeMillis() - startTime;
                                 String reply = aiResponseBuilder.toString();
 
-                                // 提取商品ID
+                                // 从 AI 回复中，提取商品ID
                                 List<Long> productIds = extractProductIds(reply);
                                 recommendedProductIds.set(productIds);
 
@@ -262,10 +261,9 @@ public class LoveApp {
                                                 .build())
                                         .build();
                                 // 保存消息到数据库
-                                chatMessageRepository.save(aiMessage);
+                                chatMessageService.save(aiMessage);
 
-                                // 更新计数
-                                chatSessionService.incrementMessageCount(request.getSessionId());
+                                // 更新消息计数，这个方法就是 +2
                                 chatSessionService.incrementMessageCount(request.getSessionId());
                         })
                         .doOnError(error -> {
@@ -281,12 +279,10 @@ public class LoveApp {
                                                 .messageType(MessageType.TEXT)
                                                 .isAiResponse(true)
                                                 .build();
-                                        chatMessageRepository.save(errorMessage);
-                                        log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
-                                                errorContent.length());
+                                        chatMessageService.save(errorMessage);
+                                        log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(), errorContent.length());
 
-                                        // 更新会话的消息计数（用户消息 1 条 ， AI错误回复1条）
-                                        chatSessionService.incrementMessageCount(request.getSessionId());
+                                        // 更新消息计数，这个方法就是 +2
                                         chatSessionService.incrementMessageCount(request.getSessionId());
                                 }
                         })
@@ -295,7 +291,6 @@ public class LoveApp {
                                 if (ids.isEmpty()) {
                                         return Flux.empty();
                                 }
-
                                 List<ProductVO> vos = productRecommendService.getProductVOsByIds(ids);
                                 String productJson = "\n[PRODUCTS]" + JSONUtil.toJsonStr(vos) + "[/PRODUCTS]";
 
@@ -313,7 +308,7 @@ public class LoveApp {
                 saveUserMessage(request);
 
                 // 2. 获取历史上下文（排除刚保存的用户消息），查询了 10 条历史记录
-                List<ChatMessage> historyMessages = chatMessageRepository
+                List<ChatMessage> historyMessages = chatMessageService
                                 .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
                 log.info("获取用户，id={}，历史上下文，数量={}", request.getChatId(), historyMessages.size());
 
@@ -385,11 +380,10 @@ public class LoveApp {
                                                                 .build())
                                                 .build();
                                 // 保存到 MongoDB
-                                chatMessageRepository.save(aiMessage);
+                                chatMessageService.save(aiMessage);
                                 log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(), aiContent.length());
 
                                 // 更新会话的消息计数（+2，用户消息1条 + AI回复1条）
-                                chatSessionService.incrementMessageCount(request.getSessionId());
                                 chatSessionService.incrementMessageCount(request.getSessionId());
                         })
                         // 关键：doOnError处理异常
@@ -406,12 +400,11 @@ public class LoveApp {
                                                         .messageType(MessageType.TEXT)
                                                         .isAiResponse(true)
                                                         .build();
-                                        chatMessageRepository.save(errorMessage);
+                                        chatMessageService.save(errorMessage);
                                         log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
                                                         errorContent.length());
 
                                         // 更新会话的消息计数（+2，用户消息1条 + AI错误回复1条）
-                                        chatSessionService.incrementMessageCount(request.getSessionId());
                                         chatSessionService.incrementMessageCount(request.getSessionId());
                                 }
                         });
@@ -436,7 +429,7 @@ public class LoveApp {
 
 
         /**
-         * 从 AI 回复中提取推荐的商品ID
+         * 从 AI 回复中提取推荐的商品 ID
          * 解析格式：【推荐商品】商品ID: 1\n商品ID: 3【结束】
          */
         private List<Long> extractProductIds(String aiReply) {
@@ -477,7 +470,7 @@ public class LoveApp {
         /**
          * 保存用户消息到 MongoDB
          */
-        private ChatMessage saveUserMessage(ChatRequest request) {
+        private void saveUserMessage(ChatRequest request) {
                 String userMessageId = UUID.randomUUID().toString();
                 ChatMessage userMessage = ChatMessage.builder()
                                 .id(userMessageId)
@@ -488,13 +481,13 @@ public class LoveApp {
                                 .isAiResponse(false)
                                 .build();
                 // TODO 需要优化
-                return chatMessageRepository.save(userMessage);
+                chatMessageService.save(userMessage);
         }
 
         /**
          * 保存用户游戏记录到 MongoDB
          */
-        private ChatMessage saveUserGameMessage(ChatRequest request) {
+        private void saveUserGameMessage(ChatRequest request) {
                 String userMessageId = UUID.randomUUID().toString();
                 ChatMessage userMessage = ChatMessage.builder()
                         .id(userMessageId)
@@ -504,10 +497,8 @@ public class LoveApp {
                         .content(request.getMessage())
                         .isAiResponse(false)
                         .build();
-                // TODO 需要优化
-                return chatMessageRepository.save(userMessage);
+                chatMessageService.save(userMessage);
         }
-
 
 
         /**
@@ -640,7 +631,7 @@ public class LoveApp {
                         .id(sessionId)
                         .chatId(chatId)
                         .build();
-                chatSessionRepository.save(gameChatSession);
+                chatSessionService.save(gameChatSession);
                 ChatMessage chatMessage = ChatMessage.builder()
                         .sessionId(sessionId)
                         .chatId(chatId)
@@ -648,7 +639,7 @@ public class LoveApp {
                         .isAiResponse(false)
                         .content("女友生气的原因：" + message + ",女友现在的心情：" + emo)
                         .build();
-                chatMessageRepository.save(chatMessage);
+                chatMessageService.save(chatMessage);
 
                 // 4.构建返回对象，并返回
                 return GameChatVO.builder()
@@ -663,10 +654,10 @@ public class LoveApp {
          */
         public Flux<String> gameStreamChat(ChatRequest request) {
                 // 1.同步保存用户消息
-                ChatMessage chatMessage = saveUserGameMessage(request);
+                saveUserGameMessage(request);
 
                 // 2. 获取历史上下文（排除刚保存的用户消息），查询了 10 条历史记录
-                List<ChatMessage> historyMessages = chatMessageRepository
+                List<ChatMessage> historyMessages = chatMessageService
                         .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
                 log.info("获取用户，id={}，历史上下文，数量={}", request.getChatId(), historyMessages.size());
 
@@ -708,7 +699,7 @@ public class LoveApp {
                                         .isAiResponse(true)
                                         .build();
                                 // 保存到 MongoDB
-                                chatMessageRepository.save(aiMessage);
+                                chatMessageService.save(aiMessage);
                                 log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(), aiContent.length());
                         })
                         // 关键：doOnError处理异常
@@ -725,7 +716,7 @@ public class LoveApp {
                                                 .messageType(MessageType.GAME)
                                                 .isAiResponse(true)
                                                 .build();
-                                        chatMessageRepository.save(errorMessage);
+                                        chatMessageService.save(errorMessage);
                                         log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(), errorContent.length());
                                 }
                         });

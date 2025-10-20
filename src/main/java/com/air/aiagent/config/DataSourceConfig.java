@@ -15,8 +15,8 @@ import javax.sql.DataSource;
 
 /**
  * 多数据源配置类
- * MySQL - 主数据源，供MyBatis使用
- * PostgreSQL - 次数据源，供Spring AI PgVector使用
+ * MySQL - 主数据源，供 MyBatis-plus 使用
+ * PostgreSQL - 次数据源，供 Spring AI PgVector 使用
  * 
  * @author WyH524
  */
@@ -45,7 +45,7 @@ public class DataSourceConfig {
     }
 
     /**
-     * MySQL的JdbcTemplate（供MyBatis等使用）
+     * MySQL的JdbcTemplate（供 MyBatis-plus 等使用）
      */
     @Primary
     @Bean(name = "mysqlJdbcTemplate")
@@ -54,19 +54,25 @@ public class DataSourceConfig {
     }
 
     /**
-     * PostgreSQL的JdbcTemplate（专门供PgVectorStore使用）
+     * PostgreSQL的 JdbcTemplate（专门供 PgVectorStore 使用）
      */
     @Bean(name = "pgJdbcTemplate")
     public JdbcTemplate pgJdbcTemplate(@Qualifier("pgDataSource") DataSource dataSource) {
         return new JdbcTemplate(dataSource);
     }
 
+    /**
+     * 事务管理
+     */
     @Primary
     @Bean(name = "mysqlTransactionManager")
     public PlatformTransactionManager mysqlTransactionManager(@Qualifier("mysqlDataSource") DataSource dataSource) {
         return new DataSourceTransactionManager(dataSource);
     }
 
+    /**
+     * 事务管理
+     */
     @Bean(name = "pgTransactionManager")
     public PlatformTransactionManager pgTransactionManager(@Qualifier("pgDataSource") DataSource dataSource) {
         return new DataSourceTransactionManager(dataSource);

@@ -27,9 +27,10 @@ public class IntentChatClientConfig {
 
         // 创建 DashScopeChatModel（不指定模型，让调用者决定）
         return new DashScopeChatModel(dashScopeApi);
+
         // ChatModel intentChatModel = new DashScopeChatModel(dashScopeApi);
         // 这里只创建了一个到阿里云的连接
-        // 并没有指定使用哪个模型
+        // 并没有指定使用哪个模型，后面我们使用的时候再通过这个连接指定模型
         // qwen3-max 主模型，不影响
     }
 }

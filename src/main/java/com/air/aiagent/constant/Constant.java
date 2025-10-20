@@ -28,5 +28,8 @@ public interface Constant {
     // 通常是项目的根目录（与 pom.xml 或 build.gradle 同级）
 
 
+    /**
+     * 游戏的会话名称，之后我们如果想要删除游戏的聊天记录的话，可以删除这个 sessionName
+     */
     String GAME_SESSION_NAME = "d4728f1a-5b3e-4c89-b12f-7a9c83e14f21";
 }

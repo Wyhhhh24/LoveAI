@@ -16,7 +16,7 @@ public class LangChainAiInvoke {
                 .apiKey(APIKEY)
                 .modelName("qwen-max")
                 .build();
-        //可以直接拿到结果
+        // 可以直接拿到结果
         String response = chatModel.chat("你是谁？");
         System.out.println(response);
     }
