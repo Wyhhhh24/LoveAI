@@ -10,7 +10,6 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 * @Entity generator.domain.File
 */
 public interface UserFileMapper extends BaseMapper<UserFile> {
-
 }
 
 

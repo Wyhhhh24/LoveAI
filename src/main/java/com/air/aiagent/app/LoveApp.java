@@ -53,7 +53,6 @@ public class LoveApp {
 
         private final ChatClient emoClient;
 
-
         /**
          * 初始化 AI 客户端 ChatClient
          */
@@ -64,9 +63,9 @@ public class LoveApp {
                 chatClient = ChatClient.builder(dashscopeChatModel)
                                 .defaultSystem(SystemConstants.CHAT_SYSTEM_PROMPT)
                                 .defaultAdvisors(
-                                        // 自定义日志拦截器，可按需开启
-                                        new MyLoggerAdvisor()
-                                        // ,new ReReadingAdvisor()
+                                                // 自定义日志拦截器，可按需开启
+                                                new MyLoggerAdvisor()
+                                // ,new ReReadingAdvisor()
                                 )
                                 .build();
 
@@ -127,7 +126,6 @@ public class LoveApp {
         @Resource
         private ChatMessageService chatMessageService;
 
-
         // 引入这个类，我们的Spring AI MCP 服务，它在启动的时候，会自动去读取我们刚刚所写的 mcp-servers.json 配置文件
         // 从中找到所有的工具，然后自动注册到这个工具提供者类上，我们就可以直接使用它了
         @Resource
@@ -151,7 +149,6 @@ public class LoveApp {
         @Resource
         private ToolCallback[] allTools;
 
-
         /**
          * 智能对话入口 - 根据意图选择是否推荐商品
          */
@@ -163,13 +160,12 @@ public class LoveApp {
                 if (needRecommend) {
                         log.info("检测到购买意图，启用商品推荐模式");
                         String scene = intentRecognizer.recognizeScene(request.getMessage());
-                        return chatWithProductRecommend(request,scene);
+                        return chatWithProductRecommend(request, scene);
                 } else {
                         log.info("纯咨询对话，不推荐商品");
-                        return doChatWithRagAndTools(request);  // 你现有的方法
+                        return doChatWithRagAndTools(request); // 你现有的方法
                 }
         }
-
 
         /**
          * 带商品推荐的 RAG 对话
@@ -180,15 +176,14 @@ public class LoveApp {
 
                 // 1.查询历史对话
                 List<ChatMessage> historyMessages = chatMessageService
-                        .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
+                                .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
                 // 如果历史对话为空，当前消息作为会话名称
                 if (historyMessages.isEmpty()) {
                         // 更新会话名称
                         boolean success = chatSessionService.updateSessionName(
-                                request.getSessionId(),
-                                request.getChatId(),
-                                request.getMessage()
-                        );
+                                        request.getSessionId(),
+                                        request.getChatId(),
+                                        request.getMessage());
                         if (success) {
                                 log.info("会话名称已更新为: {}", request.getMessage());
                         }
@@ -206,13 +201,13 @@ public class LoveApp {
                 // 4.将商品 List 转换成 String
                 String productInfo = formatProductsForPrompt(productList);
                 // 构造包含商品信息的系统提示词
-                String enhancedSystemPrompt =SystemConstants.ENHANCEDSYSTEMPROMPT.formatted(scene, productInfo);
+                String enhancedSystemPrompt = SystemConstants.ENHANCEDSYSTEMPROMPT.formatted(scene, productInfo);
 
                 // 5.构建完整提示词
                 String fullPrompt = buildPromptWithContext(
-                        historyMessages,
-                        request.getMessage(),
-                        request.getChatId());
+                                historyMessages,
+                                request.getMessage(),
+                                request.getChatId());
                 log.info("用户 id={}，完整提示词构建完成，长度={}", request.getChatId(), fullPrompt.length());
 
                 // 7. 创建 StringBuilder 来累积 AI 的流式响应
@@ -222,83 +217,83 @@ public class LoveApp {
                 // 创建一个计时器，用于记录流式响应的时长
                 long startTime = System.currentTimeMillis();
 
-                // 8. 处理流式响应，提取商品ID  todo 这里需要解读一下
+                // 8. 处理流式响应，提取商品ID todo 这里需要解读一下
                 AtomicReference<List<Long>> recommendedProductIds = new AtomicReference<>(new ArrayList<>());
 
                 return chatClient
-                        .prompt()
-                        .system(enhancedSystemPrompt) // 设置新的系统提示词，推荐商品提示词
-                        .user(fullPrompt)
-                        .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
-                        .stream()
-                        .content()
-                        .doOnNext(
-                                chunk -> aiResponseBuilder.append(chunk)
-                        )
-                        .doOnComplete(() -> {
-                                long duration = System.currentTimeMillis() - startTime;
-                                String reply = aiResponseBuilder.toString();
+                                .prompt()
+                                .system(enhancedSystemPrompt) // 设置新的系统提示词，推荐商品提示词
+                                .user(fullPrompt)
+                                .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
+                                .stream()
+                                .content()
+                                .doOnNext(
+                                                chunk -> aiResponseBuilder.append(chunk))
+                                .doOnComplete(() -> {
+                                        long duration = System.currentTimeMillis() - startTime;
+                                        String reply = aiResponseBuilder.toString();
 
-                                // 从 AI 回复中，提取商品ID
-                                List<Long> productIds = extractProductIds(reply);
-                                recommendedProductIds.set(productIds);
+                                        // 从 AI 回复中，提取商品ID
+                                        List<Long> productIds = extractProductIds(reply);
+                                        recommendedProductIds.set(productIds);
 
-                                // 清理标记符，也就是 ai 回复中可能包含一些标记符
-                                String cleanReply = removeProductMarkers(reply);
+                                        // 清理标记符，也就是 ai 回复中可能包含一些标记符
+                                        String cleanReply = removeProductMarkers(reply);
 
-                                // 保存消息
-                                ChatMessage aiMessage = ChatMessage.builder()
-                                        .id(aiMessageId)
-                                        .chatId(request.getChatId())
-                                        .sessionId(request.getSessionId())
-                                        .content(cleanReply)
-                                        .messageType(MessageType.TEXT)
-                                        .isAiResponse(true)
-                                        .metadata(MessageMetadata.builder()
-                                                .responseTimeMs((int) duration)
-                                                .tokenCount(estimateTokens(cleanReply))
-                                                .recommendedProductIds(productIds)  // 如果该条记录推荐了商品 ID 列表，就保存
-                                                .build())
-                                        .build();
-                                // 保存消息到数据库
-                                chatMessageService.save(aiMessage);
-
-                                // 更新消息计数，这个方法就是 +2
-                                chatSessionService.incrementMessageCount(request.getSessionId());
-                        })
-                        .doOnError(error -> {
-                                log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
-                                // 即使出错，也保存已有的部分内容
-                                if (aiResponseBuilder.length() > 0) {
-                                        String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
-                                        ChatMessage errorMessage = ChatMessage.builder()
-                                                .id(aiMessageId)
-                                                .chatId(request.getChatId())
-                                                .sessionId(request.getSessionId())
-                                                .content(errorContent)
-                                                .messageType(MessageType.TEXT)
-                                                .isAiResponse(true)
-                                                .build();
-                                        chatMessageService.save(errorMessage);
-                                        log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(), errorContent.length());
+                                        // 保存消息
+                                        ChatMessage aiMessage = ChatMessage.builder()
+                                                        .id(aiMessageId)
+                                                        .chatId(request.getChatId())
+                                                        .sessionId(request.getSessionId())
+                                                        .content(cleanReply)
+                                                        .messageType(MessageType.TEXT)
+                                                        .isAiResponse(true)
+                                                        .metadata(MessageMetadata.builder()
+                                                                        .responseTimeMs((int) duration)
+                                                                        .tokenCount(estimateTokens(cleanReply))
+                                                                        .recommendedProductIds(productIds) // 如果该条记录推荐了商品
+                                                                                                           // ID 列表，就保存
+                                                                        .build())
+                                                        .build();
+                                        // 保存消息到数据库
+                                        chatMessageService.save(aiMessage);
 
                                         // 更新消息计数，这个方法就是 +2
                                         chatSessionService.incrementMessageCount(request.getSessionId());
-                                }
-                        })
-                        .concatWith(Flux.defer(() -> {
-                                List<Long> ids = recommendedProductIds.get();
-                                if (ids.isEmpty()) {
-                                        return Flux.empty();
-                                }
-                                List<ProductVO> vos = productRecommendService.getProductVOsByIds(ids);
-                                String productJson = "\n[PRODUCTS]" + JSONUtil.toJsonStr(vos) + "[/PRODUCTS]";
+                                })
+                                .doOnError(error -> {
+                                        log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
+                                        // 即使出错，也保存已有的部分内容
+                                        if (aiResponseBuilder.length() > 0) {
+                                                String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
+                                                ChatMessage errorMessage = ChatMessage.builder()
+                                                                .id(aiMessageId)
+                                                                .chatId(request.getChatId())
+                                                                .sessionId(request.getSessionId())
+                                                                .content(errorContent)
+                                                                .messageType(MessageType.TEXT)
+                                                                .isAiResponse(true)
+                                                                .build();
+                                                chatMessageService.save(errorMessage);
+                                                log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
+                                                                errorContent.length());
 
-                                log.info("返回推荐商品，数量={}", vos.size());
-                                return Flux.just(productJson);
-                        }));
+                                                // 更新消息计数，这个方法就是 +2
+                                                chatSessionService.incrementMessageCount(request.getSessionId());
+                                        }
+                                })
+                                .concatWith(Flux.defer(() -> {
+                                        List<Long> ids = recommendedProductIds.get();
+                                        if (ids.isEmpty()) {
+                                                return Flux.empty();
+                                        }
+                                        List<ProductVO> vos = productRecommendService.getProductVOsByIds(ids);
+                                        String productJson = "\n[PRODUCTS]" + JSONUtil.toJsonStr(vos) + "[/PRODUCTS]";
+
+                                        log.info("返回推荐商品，数量={}", vos.size());
+                                        return Flux.just(productJson);
+                                }));
         }
-
 
         /**
          * 基于知识库文档，支持工具调用
@@ -341,92 +336,109 @@ public class LoveApp {
 
                 // 5. 流式调用AI并累积响应
                 return chatClient
-                        .prompt()
-                        .user("userId = " + request.getChatId() + "," + fullPrompt)
-                        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId) 改为使用
-                        // MongoDB 存储会话历史
-                        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-                        // 应用 RAG 知识库问答（基于内存的知识库服务）
-                        // .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
-                        // 应用 RAG 检索增强服务（基于云知识库服务）
-                        // .advisors(loveAppRagCloudAdvisor)
-                        // 应用 RAG 检索增强服务（基于 PgVector 向量存储）
-                        .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
-                        .tools(allTools)
-                        .tools(toolCallbackProvider)
-                        .stream()
-                        .content() // 流式处理
-                        // 关键：doOnNext累积每个chunk
-                        .doOnNext(chunk -> {
-                                aiResponseBuilder.append(chunk);
-                        })
-                        // 关键：doOnComplete 在流式结束后保存
-                        .doOnComplete(() -> {
-                                // 计算耗时
-                                long duration = System.currentTimeMillis() - startTime;
-                                // 同步保存完整的 AI 回复
-                                String aiContent = aiResponseBuilder.toString();
-                                // 构建消息实体
-                                ChatMessage aiMessage = ChatMessage.builder()
-                                                .id(aiMessageId)
-                                                .chatId(request.getChatId())
-                                                .sessionId(request.getSessionId())
-                                                .content(aiContent)
-                                                .messageType(MessageType.TEXT)
-                                                .isAiResponse(true)
-                                                .metadata(MessageMetadata.builder()
-                                                                .responseTimeMs((int) duration)
-                                                                .tokenCount(estimateTokens(aiContent))
-                                                                .build())
-                                                .build();
-                                // 保存到 MongoDB
-                                chatMessageService.save(aiMessage);
-                                log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(), aiContent.length());
-
-                                // 更新会话的消息计数（+2，用户消息1条 + AI回复1条）
-                                chatSessionService.incrementMessageCount(request.getSessionId());
-                        })
-                        // 关键：doOnError处理异常
-                        .doOnError(error -> {
-                                log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
-                                // 即使出错，也保存已有的部分内容
-                                if (aiResponseBuilder.length() > 0) {
-                                        String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
-                                        ChatMessage errorMessage = ChatMessage.builder()
+                                .prompt()
+                                .user("userId = " + request.getChatId() + "," + fullPrompt)
+                                // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId) 改为使用
+                                // MongoDB 存储会话历史
+                                // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+                                // 应用 RAG 知识库问答（基于内存的知识库服务）
+                                // .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
+                                // 应用 RAG 检索增强服务（基于云知识库服务）
+                                // .advisors(loveAppRagCloudAdvisor)
+                                // 应用 RAG 检索增强服务（基于 PgVector 向量存储）
+                                .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
+                                .tools(allTools)
+                                .tools(toolCallbackProvider)
+                                .stream()
+                                .content() // 流式处理
+                                // 关键：doOnNext累积每个chunk
+                                .doOnNext(chunk -> {
+                                        aiResponseBuilder.append(chunk);
+                                })
+                                // 关键：doOnComplete 在流式结束后保存
+                                .doOnComplete(() -> {
+                                        // 计算耗时
+                                        long duration = System.currentTimeMillis() - startTime;
+                                        // 同步保存完整的 AI 回复
+                                        String aiContent = aiResponseBuilder.toString();
+                                        // 构建消息实体
+                                        ChatMessage aiMessage = ChatMessage.builder()
                                                         .id(aiMessageId)
                                                         .chatId(request.getChatId())
                                                         .sessionId(request.getSessionId())
-                                                        .content(errorContent)
+                                                        .content(aiContent)
                                                         .messageType(MessageType.TEXT)
                                                         .isAiResponse(true)
+                                                        .metadata(MessageMetadata.builder()
+                                                                        .responseTimeMs((int) duration)
+                                                                        .tokenCount(estimateTokens(aiContent))
+                                                                        .build())
                                                         .build();
-                                        chatMessageService.save(errorMessage);
-                                        log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
-                                                        errorContent.length());
+                                        // 保存到 MongoDB
+                                        chatMessageService.save(aiMessage);
+                                        log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(),
+                                                        aiContent.length());
 
-                                        // 更新会话的消息计数（+2，用户消息1条 + AI错误回复1条）
+                                        // 更新会话的消息计数（+2，用户消息1条 + AI回复1条）
                                         chatSessionService.incrementMessageCount(request.getSessionId());
-                                }
-                        });
-        }
+                                })
+                                // 关键：doOnError处理异常
+                                .doOnError(error -> {
+                                        log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
+                                        // 即使出错，也保存已有的部分内容
+                                        if (aiResponseBuilder.length() > 0) {
+                                                String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
+                                                ChatMessage errorMessage = ChatMessage.builder()
+                                                                .id(aiMessageId)
+                                                                .chatId(request.getChatId())
+                                                                .sessionId(request.getSessionId())
+                                                                .content(errorContent)
+                                                                .messageType(MessageType.TEXT)
+                                                                .isAiResponse(true)
+                                                                .build();
+                                                chatMessageService.save(errorMessage);
+                                                log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
+                                                                errorContent.length());
 
+                                                // 更新会话的消息计数（+2，用户消息1条 + AI错误回复1条）
+                                                chatSessionService.incrementMessageCount(request.getSessionId());
+                                        }
+                                });
+        }
 
         /**
          * 将商品列表格式化为提示词
+         * 清晰展示商品ID、名称、价格等信息，防止AI推荐错误商品
          */
         private String formatProductsForPrompt(List<Product> products) {
-                return products.stream()
-                        .map(p -> String.format(
-                                "商品ID: %d\n名称: %s\n价格: %.2f元\n描述: %s\n适用: %s\n---",
-                                p.getId(),
-                                p.getProductName(),
-                                p.getPrice(),
-                                p.getDescription(),
-                                p.getScene()
-                        ))
-                        .collect(Collectors.joining("\n"));
-        }
+                if (products == null || products.isEmpty()) {
+                        return "暂无可推荐商品";
+                }
 
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < products.size(); i++) {
+                        Product p = products.get(i);
+                        sb.append(String.format(
+                                        "【商品%d】\n" +
+                                                        "  商品ID: %d（必须使用此ID）\n" +
+                                                        "  商品名称: %s\n" +
+                                                        "  分类: %s\n" +
+                                                        "  价格: %.2f元\n" +
+                                                        "  描述: %s\n" +
+                                                        "  适用场景: %s\n",
+                                        i + 1,
+                                        p.getId(),
+                                        p.getProductName(),
+                                        p.getCategory(),
+                                        p.getPrice(),
+                                        p.getDescription(),
+                                        p.getScene()));
+                        if (i < products.size() - 1) {
+                                sb.append("\n");
+                        }
+                }
+                return sb.toString();
+        }
 
         /**
          * 从 AI 回复中提取推荐的商品 ID
@@ -452,10 +464,9 @@ public class LoveApp {
          */
         private String removeProductMarkers(String aiReply) {
                 return aiReply
-                        .replaceAll("【推荐商品】[\\s\\S]*?【结束】", "")
-                        .trim();
+                                .replaceAll("【推荐商品】[\\s\\S]*?【结束】", "")
+                                .trim();
         }
-
 
         /**
          * 估算Token数量，后面可以从 ai 回复中进行提取
@@ -490,16 +501,15 @@ public class LoveApp {
         private void saveUserGameMessage(ChatRequest request) {
                 String userMessageId = UUID.randomUUID().toString();
                 ChatMessage userMessage = ChatMessage.builder()
-                        .id(userMessageId)
-                        .chatId(request.getChatId())
-                        .sessionId(request.getSessionId())
-                        .messageType(MessageType.GAME)
-                        .content(request.getMessage())
-                        .isAiResponse(false)
-                        .build();
+                                .id(userMessageId)
+                                .chatId(request.getChatId())
+                                .sessionId(request.getSessionId())
+                                .messageType(MessageType.GAME)
+                                .content(request.getMessage())
+                                .isAiResponse(false)
+                                .build();
                 chatMessageService.save(userMessage);
         }
-
 
         /**
          * 构建提示词（带历史上下文）
@@ -575,41 +585,41 @@ public class LoveApp {
         /**
          * AI调用MCP服务
          */
-
-//        public String doChatWithMCP(String message, String chatId) {
-//                ChatResponse chatResponse = chatClient
-//                                .prompt()
-//                                .user(message)
-//                                .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-//                                                .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-//                                .tools(toolCallbackProvider)
-//                                .call()
-//                                .chatResponse();
-//                return chatResponse.getResult().getOutput().getText();
-//        }
+        // public String doChatWithMCP(String message, String chatId) {
+        // ChatResponse chatResponse = chatClient
+        // .prompt()
+        // .user(message)
+        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+        // .tools(toolCallbackProvider)
+        // .call()
+        // .chatResponse();
+        // return chatResponse.getResult().getOutput().getText();
+        // }
 
         // 这里我们就要定义一个格式了，定义一个恋爱报告的格式
         // 这个record语法可以快速的定义一个类，我们就可以理解为一个类，含有title、suggestion字段
         // 和定义方法的方法一样，这样一个类就定义好了
-//        public record LoveReport(String title, List<String> suggestions) {
-//
-//        }
-//
-//        /**
-//         * 结构化输出，恋爱报告功能，也就是将大模型的返回直接封装到实体类里面
-//         */
-//        public LoveReport doChatWithReport(String message, String chatId) {
-//                LoveReport loveReport = chatClient
-//                                .prompt()
-//                                .system(SystemConstants.CHAT_SYSTEM_PROMPT + "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
-//                                .user(message)
-//                                .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-//                                                .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-//                                .call()
-//                                .entity(LoveReport.class);
-//                log.info("loveReport: {}", loveReport);
-//                return loveReport;
-//        }
+        // public record LoveReport(String title, List<String> suggestions) {
+        //
+        // }
+        //
+        // /**
+        // * 结构化输出，恋爱报告功能，也就是将大模型的返回直接封装到实体类里面
+        // */
+        // public LoveReport doChatWithReport(String message, String chatId) {
+        // LoveReport loveReport = chatClient
+        // .prompt()
+        // .system(SystemConstants.CHAT_SYSTEM_PROMPT +
+        // "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
+        // .user(message)
+        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+        // .call()
+        // .entity(LoveReport.class);
+        // log.info("loveReport: {}", loveReport);
+        // return loveReport;
+        // }
 
         /**
          * 情绪返回
@@ -617,37 +627,36 @@ public class LoveApp {
         public GameChatVO doChatWithEmo(String message, String chatId) {
                 // 1.情绪分析
                 ChatResponse chatResponse = emoClient
-                        .prompt()
-                        .user(message)
-                        .call()
-                        .chatResponse();
+                                .prompt()
+                                .user(message)
+                                .call()
+                                .chatResponse();
                 String emo = chatResponse.getResult().getOutput().getText();
                 // 2.创建 sessionId ，并构造对象返回
                 String sessionId = SessionIdGenerator.generateSessionId(Long.valueOf(chatId));
 
                 // 3.创建一个游戏会话，并保存，同时保存这轮游戏中的女友情绪
                 ChatSession gameChatSession = ChatSession.builder()
-                        .sessionName(GAME_SESSION_NAME)
-                        .id(sessionId)
-                        .chatId(chatId)
-                        .build();
+                                .sessionName(GAME_SESSION_NAME)
+                                .id(sessionId)
+                                .chatId(chatId)
+                                .build();
                 chatSessionService.save(gameChatSession);
                 ChatMessage chatMessage = ChatMessage.builder()
-                        .sessionId(sessionId)
-                        .chatId(chatId)
-                        .messageType(MessageType.GAME)
-                        .isAiResponse(false)
-                        .content("女友生气的原因：" + message + ",女友现在的心情：" + emo)
-                        .build();
+                                .sessionId(sessionId)
+                                .chatId(chatId)
+                                .messageType(MessageType.GAME)
+                                .isAiResponse(false)
+                                .content("女友生气的原因：" + message + ",女友现在的心情：" + emo)
+                                .build();
                 chatMessageService.save(chatMessage);
 
                 // 4.构建返回对象，并返回
                 return GameChatVO.builder()
-                        .emo(emo)
-                        .sessionId(sessionId)
-                        .build();
+                                .emo(emo)
+                                .sessionId(sessionId)
+                                .build();
         }
-
 
         /**
          * 心跳挽回战
@@ -658,14 +667,14 @@ public class LoveApp {
 
                 // 2. 获取历史上下文（排除刚保存的用户消息），查询了 10 条历史记录
                 List<ChatMessage> historyMessages = chatMessageService
-                        .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
+                                .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
                 log.info("获取用户，id={}，历史上下文，数量={}", request.getChatId(), historyMessages.size());
 
                 // 3. 基于对话历史以及最新消息，拼接提示词
                 String fullPrompt = buildPromptWithContext(
-                        historyMessages,
-                        request.getMessage(),
-                        request.getChatId());
+                                historyMessages,
+                                request.getMessage(),
+                                request.getChatId());
                 log.info("用户id={}，完整提示词构建完成，长度={}", request.getChatId(), fullPrompt.length());
                 if (log.isDebugEnabled()) {
                         log.info("提示词内容:\n{}", fullPrompt);
@@ -677,48 +686,50 @@ public class LoveApp {
 
                 // 5. 流式调用AI并累积响应
                 return gameClient
-                        .prompt()
-                        .user(fullPrompt)
-                        .stream()
-                        .content() // 流式处理
-                        // 关键：doOnNext累积每个chunk
-                        .doOnNext(chunk -> {
-                                aiResponseBuilder.append(chunk);
-                        })
-                        // 关键：doOnComplete 在流式结束后保存
-                        .doOnComplete(() -> {
-                                // 同步保存完整的 AI 回复
-                                String aiContent = aiResponseBuilder.toString();
-                                // 构建消息实体
-                                ChatMessage aiMessage = ChatMessage.builder()
-                                        .id(aiMessageId)
-                                        .chatId(request.getChatId())
-                                        .sessionId(request.getSessionId())
-                                        .content(aiContent)
-                                        .messageType(MessageType.GAME)
-                                        .isAiResponse(true)
-                                        .build();
-                                // 保存到 MongoDB
-                                chatMessageService.save(aiMessage);
-                                log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(), aiContent.length());
-                        })
-                        // 关键：doOnError处理异常
-                        .doOnError(error -> {
-                                log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
-                                // 即使出错，也保存已有的部分内容
-                                if (aiResponseBuilder.length() > 0) {
-                                        String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
-                                        ChatMessage errorMessage = ChatMessage.builder()
-                                                .id(aiMessageId)
-                                                .chatId(request.getChatId())
-                                                .sessionId(request.getSessionId())
-                                                .content(errorContent)
-                                                .messageType(MessageType.GAME)
-                                                .isAiResponse(true)
-                                                .build();
-                                        chatMessageService.save(errorMessage);
-                                        log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(), errorContent.length());
-                                }
-                        });
+                                .prompt()
+                                .user(fullPrompt)
+                                .stream()
+                                .content() // 流式处理
+                                // 关键：doOnNext累积每个chunk
+                                .doOnNext(chunk -> {
+                                        aiResponseBuilder.append(chunk);
+                                })
+                                // 关键：doOnComplete 在流式结束后保存
+                                .doOnComplete(() -> {
+                                        // 同步保存完整的 AI 回复
+                                        String aiContent = aiResponseBuilder.toString();
+                                        // 构建消息实体
+                                        ChatMessage aiMessage = ChatMessage.builder()
+                                                        .id(aiMessageId)
+                                                        .chatId(request.getChatId())
+                                                        .sessionId(request.getSessionId())
+                                                        .content(aiContent)
+                                                        .messageType(MessageType.GAME)
+                                                        .isAiResponse(true)
+                                                        .build();
+                                        // 保存到 MongoDB
+                                        chatMessageService.save(aiMessage);
+                                        log.info("AI消息已保存，sessionId={}, 长度={}", request.getSessionId(),
+                                                        aiContent.length());
+                                })
+                                // 关键：doOnError处理异常
+                                .doOnError(error -> {
+                                        log.error("AI流式输出异常，sessionId={}", request.getSessionId(), error);
+                                        // 即使出错，也保存已有的部分内容
+                                        if (aiResponseBuilder.length() > 0) {
+                                                String errorContent = aiResponseBuilder.toString() + "\n[流式输出中断]";
+                                                ChatMessage errorMessage = ChatMessage.builder()
+                                                                .id(aiMessageId)
+                                                                .chatId(request.getChatId())
+                                                                .sessionId(request.getSessionId())
+                                                                .content(errorContent)
+                                                                .messageType(MessageType.GAME)
+                                                                .isAiResponse(true)
+                                                                .build();
+                                                chatMessageService.save(errorMessage);
+                                                log.warn("AI错误消息已保存，sessionId={}, 长度={}", request.getSessionId(),
+                                                                errorContent.length());
+                                        }
+                                });
         }
 }

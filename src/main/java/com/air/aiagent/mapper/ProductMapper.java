@@ -15,9 +15,10 @@ import java.util.List;
 * @Entity generator.domain.product
 */
 public interface ProductMapper extends BaseMapper<Product> {
-
     /**
      * 根据场景查询推荐商品，这里可以对数据库中的 场景 以及 标签 进行模糊匹配，返回匹配到的商品列表
+     *     tags '标签（逗号分隔）：道歉,生日,纪念日,表白,学习'
+     *     scene '适用场景（逗号分隔）：吵架,纪念日,初次见面,冷战'
      * @param scene 场景关键词
      * @param limit 限制数量
      * @return 商品列表
@@ -28,8 +29,10 @@ public interface ProductMapper extends BaseMapper<Product> {
             "LIMIT #{limit}")
     List<Product> selectByScene(@Param("scene") String scene, @Param("limit") int limit);
 
+
     /**
-     * 根据分类查询热门商品
+     * 根据分类查询商品
+     * '商品分类：书籍/礼物/课程'
      * @param category 分类
      * @param limit 限制数量
      * @return 商品列表

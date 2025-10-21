@@ -22,10 +22,12 @@ public interface ChatSessionRepository extends MongoRepository<ChatSession, Stri
      */
     List<ChatSession> findByChatId(String userId);
 
+
     /**
      * 根据用户ID分页查找会话
      */
     Page<ChatSession> findByChatId(String userId, Pageable pageable);
+
 
     /**
      * 根据方法名自动推断
@@ -39,32 +41,12 @@ public interface ChatSessionRepository extends MongoRepository<ChatSession, Stri
      */
     Optional<ChatSession> findFirstByChatIdOrderByCreatedAtDesc(String userId);
 
-    /**
-     * 根据用户ID和活跃状态查找会话
-     */
-    List<ChatSession> findByChatIdAndIsActive(String userId, Boolean isActive);
-
-    /**
-     * 根据用户ID和活跃状态分页查找会话
-     */
-    Page<ChatSession> findByChatIdAndIsActive(String userId, Boolean isActive, Pageable pageable);
-
-    /**
-     * 根据会话名称模糊查询
-     */
-    @Query("{'sessionName': {$regex: ?0, $options: 'i'}}")
-    List<ChatSession> findBySessionNameContaining(String sessionName);
-
-    /**
-     * 根据用户ID和会话名称模糊查询
-     */
-    @Query("{'userId': ?0, 'sessionName': {$regex: ?1, $options: 'i'}}")
-    List<ChatSession> findByChatIdAndSessionNameContaining(String userId, String sessionName);
 
     /**
      * 根据会话ID和用户ID查找会话
      */
     Optional<ChatSession> findByIdAndChatId(String id, String chatId);
+
 
     /**
      * 根据 sessionId 和 chatId 删除会话
@@ -73,53 +55,9 @@ public interface ChatSessionRepository extends MongoRepository<ChatSession, Stri
      */
     long deleteByIdAndChatId(String id, String chatId);
 
-    /**
-     * 根据创建时间范围查找会话
-     */
-    List<ChatSession> findByCreatedAtBetween(LocalDateTime startTime, LocalDateTime endTime);
-
-    /**
-     * 根据用户ID和创建时间范围查找会话
-     */
-    List<ChatSession> findByChatIdAndCreatedAtBetween(String userId, LocalDateTime startTime, LocalDateTime endTime);
-
-    /**
-     * 根据更新时间范围查找会话
-     */
-    List<ChatSession> findByUpdatedAtBetween(LocalDateTime startTime, LocalDateTime endTime);
-
-    /**
-     * 根据用户ID和更新时间范围查找会话
-     */
-    List<ChatSession> findByChatIdAndUpdatedAtBetween(String userId, LocalDateTime startTime, LocalDateTime endTime);
 
     /**
      * 统计用户会话数量
      */
     long countByChatId(String userId);
-
-    /**
-     * 统计活跃会话数量
-     */
-    long countByIsActive(Boolean isActive);
-
-    /**
-     * 统计用户活跃会话数量
-     */
-    long countByChatIdAndIsActive(String userId, Boolean isActive);
-
-    /**
-     * 删除用户的所有会话
-     */
-    void deleteByChatId(String userId);
-
-    /**
-     * 删除非活跃会话
-     */
-    void deleteByIsActive(Boolean isActive);
-
-    /**
-     * 删除用户非活跃会话
-     */
-    void deleteByChatIdAndIsActive(String userId, Boolean isActive);
 }

@@ -44,9 +44,10 @@ public class ChatSessionService {
     /**
      * 根据用户ID查找会话
      */
-    public List<ChatSession> findByChatId(String userId) {
-        return chatSessionRepository.findByChatId(userId);
+    public List<ChatSession> findByChatId(String chatId) {
+        return chatSessionRepository.findByChatId(chatId);
     }
+
 
     /**
      * 判断该 sessionId 对应的 session 是否存在
@@ -125,45 +126,5 @@ public class ChatSessionService {
                 .set("updated_at", LocalDateTime.now());
 
         mongoTemplate.updateFirst(query, update, ChatSession.class);
-    }
-
-
-    /**
-     * 更新会话状态
-     */
-    public boolean updateSessionActive(String id, String userId, Boolean isActive) {
-        Query query = new Query(
-                Criteria.where("_id").is(id)
-                        .and("chat_id").is(userId));
-
-        Update update = new Update()
-                .set("is_active", isActive)
-                .set("updated_at", LocalDateTime.now());
-
-        var result = mongoTemplate.updateFirst(query, update, ChatSession.class);
-
-        return result.getModifiedCount() > 0;
-    }
-
-
-    /**
-     * 批量更新会话状态
-     */
-    public long batchUpdateActive(String userId, Boolean isActive) {
-        Query query = new Query(Criteria.where("chat_id").is(userId));
-        Update update = new Update()
-                .set("is_active", isActive)
-                .set("updated_at", LocalDateTime.now());
-
-        var result = mongoTemplate.updateMulti(query, update, ChatSession.class);
-
-        return result.getModifiedCount();
-    }
-
-    /**
-     * 根据用户ID和活跃状态查找会话
-     */
-    public List<ChatSession> getUserActiveSessions(String userId) {
-        return chatSessionRepository.findByChatIdAndIsActive(userId, true);
     }
 }

@@ -86,12 +86,14 @@ public class LoveAppController {
         return ResultUtils.success(gameChatVO);
     }
 
+
     @LoginCheck
     @PostMapping(value = "/game/chat", produces = "text/html;charset=UTF-8")
     public Flux<String> gameChat(@RequestBody ChatRequest request) {
         log.info("收到游戏请求: {}", request);
         return loveApp.gameStreamChat(request);
     }
+
 
     /**
      * 获取用户文件列表
@@ -103,6 +105,7 @@ public class LoveAppController {
         List<UserFileVO> userFileList = userFileService.getUserFileList(loginUser.getId());
         return ResultUtils.success(userFileList);
     }
+
 
     /**
      * 查询最新的会话历史，也就是进入聊天页面之后，默认进行展示的聊天历史
@@ -201,13 +204,13 @@ public class LoveAppController {
         return ResultUtils.success(chatHistory);
     }
 
+
     /**
      * 创建会话返回 sessionId ，并将会话记录保存到数据库中，之后的用户发送的消息必须携带这个生成的 sessionId
      */
     @LoginCheck
     @PostMapping("/createChatSession")
-    public BaseResponse<String> createChatSession(@RequestBody ChatRequest request,
-            HttpServletRequest httpServletRequest) {
+    public BaseResponse<String> createChatSession(@RequestBody ChatRequest request, HttpServletRequest httpServletRequest) {
         // 1.获取当前登录用户
         User loginUser = userService.getLoginUser(httpServletRequest);
 
