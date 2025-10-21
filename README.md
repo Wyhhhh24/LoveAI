@@ -1,9 +1,9 @@
-# AI恋爱助手 - AI Love Assistant
+# LoveAI
 
 
 ## 项目简介
 
-**AI恋爱助手** 专为大学生打造的智能恋爱咨询平台。基于SpringAI+Qwen-Max大模型，通过RAG知识库增强、ToolCalling工具调用、MCP服务集成和游戏化交互四大核心技术，采用MongoDB多会话管理、PgVector向量检索、Redis缓存、MinIO对象存储等技术栈，提供专业的情感指导与心理支持。
+**AI恋爱助手** 专为大学生打造的智能恋爱咨询平台。基于 SpringAI+Qwen-Max大 模型，通过 RAG 知识库增强、ToolCalling 工具调用、MCP 服务集成和游戏化交互四大核心技术，采用 MongoDB 多会话管理、PgVector 向量检索、Redis 缓存、MinIO 对象存储等技术栈，提供专业的情感指导与心理支持。
 
 ## 主要功能
 
