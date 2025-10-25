@@ -153,17 +153,17 @@ public class LoveApp {
          * 智能对话入口 - 根据意图选择是否推荐商品
          */
         public Flux<String> smartChat(ChatRequest request) {
-                // 1. 调用意图识别，判断当前有没有购买意图
+                // 1.调用AI意图识别，判断当前提示词有没有购买意图
                 boolean needRecommend = intentRecognizer.needProductRecommend(request.getMessage());
 
-                // 2. 根据意图选择处理方式
+                // 2.根据意图选择处理方式
                 if (needRecommend) {
                         log.info("检测到购买意图，启用商品推荐模式");
                         String scene = intentRecognizer.recognizeScene(request.getMessage());
                         return chatWithProductRecommend(request, scene);
                 } else {
                         log.info("纯咨询对话，不推荐商品");
-                        return doChatWithRagAndTools(request); // 你现有的方法
+                        return doChatWithRagAndTools(request, false); // 你现有的方法
                 }
         }
 
@@ -189,13 +189,13 @@ public class LoveApp {
                         }
                 }
 
-                // 2.根据场景，从数据库中查询相关商品，只查询 3 个商品
+                // 2.根据场景，从数据库中查询相关商品，只查询 3 个商品 todo 这里的推荐算法得要重新考虑一下
                 List<Product> productList = productRecommendService.recommendByScene(scene, 3);
 
                 // 3.如果没有商品，降级为普通对话
                 if (productList.isEmpty()) {
                         log.warn("场景 [{}] 未找到相关商品，降级为纯咨询模式", scene);
-                        return doChatWithRagAndTools(request);
+                        return doChatWithRagAndTools(request, true);
                 }
 
                 // 4.将商品 List 转换成 String
@@ -237,7 +237,7 @@ public class LoveApp {
                                         List<Long> productIds = extractProductIds(reply);
                                         recommendedProductIds.set(productIds);
 
-                                        // 清理标记符，也就是 ai 回复中可能包含一些标记符
+                                        // 清理标记符，也就是 ai 回复中可能包含一些标记符，也就是历史记录中是没有这些标识的，但是前端流式输出的时候没有去除
                                         String cleanReply = removeProductMarkers(reply);
 
                                         // 保存消息
@@ -251,8 +251,8 @@ public class LoveApp {
                                                         .metadata(MessageMetadata.builder()
                                                                         .responseTimeMs((int) duration)
                                                                         .tokenCount(estimateTokens(cleanReply))
-                                                                        .recommendedProductIds(productIds) // 如果该条记录推荐了商品
-                                                                                                           // ID 列表，就保存
+                                                                        .recommendedProductIds(productIds) // 如果该条记录推荐了商品，ID
+                                                                                                           // 列表，就保存
                                                                         .build())
                                                         .build();
                                         // 保存消息到数据库
@@ -282,11 +282,13 @@ public class LoveApp {
                                                 chatSessionService.incrementMessageCount(request.getSessionId());
                                         }
                                 })
+                                // ai流式输出之后，最后根据商品 id 查找对应的商品信息，进行拼接
                                 .concatWith(Flux.defer(() -> {
                                         List<Long> ids = recommendedProductIds.get();
                                         if (ids.isEmpty()) {
                                                 return Flux.empty();
                                         }
+                                        // 查询数据库，返回商品信息
                                         List<ProductVO> vos = productRecommendService.getProductVOsByIds(ids);
                                         String productJson = "\n[PRODUCTS]" + JSONUtil.toJsonStr(vos) + "[/PRODUCTS]";
 
@@ -298,17 +300,20 @@ public class LoveApp {
         /**
          * 基于知识库文档，支持工具调用
          */
-        public Flux<String> doChatWithRagAndTools(ChatRequest request) {
-                // 1. 同步保存用户消息
-                saveUserMessage(request);
+        public Flux<String> doChatWithRagAndTools(ChatRequest request, Boolean isNotDirect) {
+                // 如果是降级调用的话，不需要保存用户信息，否则就保存用户信息
+                if (!isNotDirect) {
+                        // 1. 同步保存用户消息
+                        saveUserMessage(request);
+                }
 
                 // 2. 获取历史上下文（排除刚保存的用户消息），查询了 10 条历史记录
                 List<ChatMessage> historyMessages = chatMessageService
                                 .findHistoryExcludingLatest(request.getSessionId(), 10, 1);
                 log.info("获取用户，id={}，历史上下文，数量={}", request.getChatId(), historyMessages.size());
 
-                // 如果历史记录集合是空的话，将当前的消息作为这个 session 的 sessionName
-                if (historyMessages.isEmpty()) {
+                // 如果历史记录集合是空的，并且不是降级调用，将当前的消息作为这个 session 的 sessionName
+                if (historyMessages.isEmpty() && !isNotDirect) {
                         // 更新会话名称
                         boolean success = chatSessionService.updateSessionName(request.getSessionId(),
                                         request.getChatId(), request.getMessage());
@@ -441,18 +446,37 @@ public class LoveApp {
         }
 
         /**
-         * 从 AI 回复中提取推荐的商品 ID
+         * 从 AI 回复中提取推荐的商品 ID 正则表达式提取
          * 解析格式：【推荐商品】商品ID: 1\n商品ID: 3【结束】
          */
         private List<Long> extractProductIds(String aiReply) {
                 List<Long> ids = new ArrayList<>();
 
-                // 使用正则提取 "商品ID: 数字"
-                Pattern pattern = Pattern.compile("商品ID[：:]*\\s*(\\d+)");
-                Matcher matcher = pattern.matcher(aiReply);
+                // 首先检查是否包含完整的标记符
+                if (!aiReply.contains("【推荐商品】") || !aiReply.contains("【结束】")) {
+                        log.warn("AI回复中缺少商品推荐标记符，无法提取商品ID");
+                        return ids;
+                }
 
-                while (matcher.find()) {
-                        ids.add(Long.parseLong(matcher.group(1)));
+                // 提取标记符之间的内容
+                Pattern markerPattern = Pattern.compile("【推荐商品】([\\s\\S]*?)【结束】");
+                Matcher markerMatcher = markerPattern.matcher(aiReply);
+
+                if (markerMatcher.find()) {
+                        String content = markerMatcher.group(1);
+                        // 在标记符内提取商品ID
+                        Pattern idPattern = Pattern.compile("商品ID[：:]*\\s*(\\d+)");
+                        Matcher idMatcher = idPattern.matcher(content);
+
+                        while (idMatcher.find()) {
+                                try {
+                                        ids.add(Long.parseLong(idMatcher.group(1)));
+                                } catch (NumberFormatException e) {
+                                        log.warn("解析商品ID失败: {}", idMatcher.group(1));
+                                }
+                        }
+                } else {
+                        log.warn("无法找到商品推荐标记符内容");
                 }
 
                 log.info("从AI回复中提取到商品ID: {}", ids);
@@ -491,7 +515,6 @@ public class LoveApp {
                                 .content(request.getMessage())
                                 .isAiResponse(false)
                                 .build();
-                // TODO 需要优化
                 chatMessageService.save(userMessage);
         }
 
@@ -546,80 +569,6 @@ public class LoveApp {
 
                 return prompt.toString();
         }
-
-        // /**
-        // * AI 恋爱大师（支持调用工具）
-        // */
-        // public String doChatWithTools(String message, String chatId) {
-        // ChatResponse chatResponse = chatClient
-        // .prompt()
-        // .user(message)
-        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-        // .tools(allTools)
-        // .call()
-        // .chatResponse(); //同步阻塞调用
-        // return chatResponse.getResult().getOutput().getText();
-        // }
-
-        // //RAG 知识库进行对话
-        // public String doChatWithRag(String message, String chatId){
-        // ChatResponse chatResponse = chatClient.prompt()
-        // .user(message)
-        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-        // //应用 RAG 知识库问答（基于本地知识库服务）
-        // .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
-        // //应用 RAG 检索增强服务（基于云知识库服务）
-        //// .advisors(loveAppRagCloudAdvisor)
-        // //应用 RAG 检索增强服务（基于 PgVector 向量存储）
-        //// .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
-        // .call()
-        // .chatResponse();
-        // //先拿到结果，再拿到它的输出信息，也可以拿到原信息，比如消耗的多少token，这里拿到输出信息中大模型返回的文本
-        // String content = chatResponse.getResult().getOutput().getText();
-        // log.info("content: {}", content);
-        // return content;
-        // }
-
-        /**
-         * AI调用MCP服务
-         */
-        // public String doChatWithMCP(String message, String chatId) {
-        // ChatResponse chatResponse = chatClient
-        // .prompt()
-        // .user(message)
-        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-        // .tools(toolCallbackProvider)
-        // .call()
-        // .chatResponse();
-        // return chatResponse.getResult().getOutput().getText();
-        // }
-
-        // 这里我们就要定义一个格式了，定义一个恋爱报告的格式
-        // 这个record语法可以快速的定义一个类，我们就可以理解为一个类，含有title、suggestion字段
-        // 和定义方法的方法一样，这样一个类就定义好了
-        // public record LoveReport(String title, List<String> suggestions) {
-        //
-        // }
-        //
-        // /**
-        // * 结构化输出，恋爱报告功能，也就是将大模型的返回直接封装到实体类里面
-        // */
-        // public LoveReport doChatWithReport(String message, String chatId) {
-        // LoveReport loveReport = chatClient
-        // .prompt()
-        // .system(SystemConstants.CHAT_SYSTEM_PROMPT +
-        // "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
-        // .user(message)
-        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
-        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
-        // .call()
-        // .entity(LoveReport.class);
-        // log.info("loveReport: {}", loveReport);
-        // return loveReport;
-        // }
 
         /**
          * 情绪返回
@@ -732,4 +681,78 @@ public class LoveApp {
                                         }
                                 });
         }
+
+        // /**
+        // * AI 恋爱大师（支持调用工具）
+        // */
+        // public String doChatWithTools(String message, String chatId) {
+        // ChatResponse chatResponse = chatClient
+        // .prompt()
+        // .user(message)
+        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+        // .tools(allTools)
+        // .call()
+        // .chatResponse(); //同步阻塞调用
+        // return chatResponse.getResult().getOutput().getText();
+        // }
+
+        // //RAG 知识库进行对话
+        // public String doChatWithRag(String message, String chatId){
+        // ChatResponse chatResponse = chatClient.prompt()
+        // .user(message)
+        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+        // //应用 RAG 知识库问答（基于本地知识库服务）
+        // .advisors(new QuestionAnswerAdvisor(loveAppVectorStore))
+        // //应用 RAG 检索增强服务（基于云知识库服务）
+        //// .advisors(loveAppRagCloudAdvisor)
+        // //应用 RAG 检索增强服务（基于 PgVector 向量存储）
+        //// .advisors(new QuestionAnswerAdvisor(pgVectorVectorStore))
+        // .call()
+        // .chatResponse();
+        // //先拿到结果，再拿到它的输出信息，也可以拿到原信息，比如消耗的多少token，这里拿到输出信息中大模型返回的文本
+        // String content = chatResponse.getResult().getOutput().getText();
+        // log.info("content: {}", content);
+        // return content;
+        // }
+
+        /**
+         * AI调用MCP服务
+         */
+        // public String doChatWithMCP(String message, String chatId) {
+        // ChatResponse chatResponse = chatClient
+        // .prompt()
+        // .user(message)
+        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+        // .tools(toolCallbackProvider)
+        // .call()
+        // .chatResponse();
+        // return chatResponse.getResult().getOutput().getText();
+        // }
+
+        // 这里我们就要定义一个格式了，定义一个恋爱报告的格式
+        // 这个record语法可以快速的定义一个类，我们就可以理解为一个类，含有title、suggestion字段
+        // 和定义方法的方法一样，这样一个类就定义好了
+        // public record LoveReport(String title, List<String> suggestions) {
+        //
+        // }
+        //
+        // /**
+        // * 结构化输出，恋爱报告功能，也就是将大模型的返回直接封装到实体类里面
+        // */
+        // public LoveReport doChatWithReport(String message, String chatId) {
+        // LoveReport loveReport = chatClient
+        // .prompt()
+        // .system(SystemConstants.CHAT_SYSTEM_PROMPT +
+        // "每次对话后都要生成恋爱结果，标题为{用户名}的恋爱报告，内容为建议列表")
+        // .user(message)
+        // .advisors(spec -> spec.param(CHAT_MEMORY_CONVERSATION_ID_KEY, chatId)
+        // .param(CHAT_MEMORY_RETRIEVE_SIZE_KEY, 10))
+        // .call()
+        // .entity(LoveReport.class);
+        // log.info("loveReport: {}", loveReport);
+        // return loveReport;
+        // }
 }

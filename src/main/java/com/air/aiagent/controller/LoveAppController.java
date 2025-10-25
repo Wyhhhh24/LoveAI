@@ -68,7 +68,7 @@ public class LoveAppController {
     @ClearContext
     public Flux<String> chatWithRag(@RequestBody ChatRequest request) {
         log.info("收到RAG知识库对话请求: {}", request);
-        // 1.已经做了用户是否登录的检测也就是 chatId 是否存在的判断，接下来判断该 sessionId 在数据库中是否存在
+        // 1.AOP 已经做了用户是否登录判断，接下来判断该 sessionId 对应的 session 在数据库中是否存在
         Optional<ChatSession> session = chatSessionService.findById(request.getSessionId());
         if (!session.isPresent()) {
             // 2.如果该 session 不存在，抛异常

@@ -25,8 +25,7 @@ public interface ProductMapper extends BaseMapper<Product> {
      */
     @Select("SELECT * FROM product " +
             "WHERE status = 1 " +
-            "AND (scene LIKE CONCAT('%', #{scene}, '%') OR tags LIKE CONCAT('%', #{scene}, '%')) " +
-            "LIMIT #{limit}")
+            "AND scene LIKE CONCAT('%', #{scene}, '%') " + "LIMIT #{limit}")
     List<Product> selectByScene(@Param("scene") String scene, @Param("limit") int limit);
 
 

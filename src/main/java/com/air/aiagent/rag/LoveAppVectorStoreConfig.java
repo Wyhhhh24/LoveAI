@@ -5,7 +5,6 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import java.util.List;
 
 /**
@@ -31,7 +30,7 @@ public class LoveAppVectorStoreConfig {
     // 定义一个Bean，它的返回类型一定是 VectorStore 类型，因为我们要实现这个VectorStore接口，等会才能在我们的大模型，基于这个 VectorStore（向量数据库） 检索内容
     @Bean  // loveAppVectorStore 这个其实就是 Bean 的名字，依赖注入的时候也要用相同的名称
     VectorStore loveAppVectorStore(EmbeddingModel embeddingModel){
-        // 这里还有一个注意事项，刚才提到我们想要把文档转换成向量，得要调用一个Embedding模型（嵌入模型），SpringAI为我们提供了 Embedding 模型（嵌入模型）的注入
+        // 这里还有一个注意事项，刚才提到我们想要把文档转换成向量，得要调用一个Embedding模型（嵌入模型），SpringAI 为我们默认配置千问 text-embedding-v1 模型（嵌入模型）的注入
         // 注入的一定是SpringAI的 EmbeddingModel
         // 有了嵌入大模型了，就可以定义一个简易的基于内存的 VectorStore 存储 SimpleVectorStore
         SimpleVectorStore simpleVectorStore = SimpleVectorStore.builder(embeddingModel).build();
